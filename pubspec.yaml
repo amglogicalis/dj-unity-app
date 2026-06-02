@@ -1,0 +1,36 @@
+name: hybrid_music_room
+description: Una app de reproducción musical con enfoque híbrido (Host/Guest).
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # Firebase
+  firebase_core: ^2.24.2
+  cloud_firestore: ^4.13.6
+  
+  # Permisos
+  permission_handler: ^11.1.1
+  
+  # Reproductores / Fuentes
+  youtube_player_flutter: ^8.1.2
+  spotify_sdk: ^2.3.0
+  
+  # Utilidades
+  qr_flutter: ^4.1.0 # Generación de Códigos QR para invitados
+  http: ^1.2.0
+  youtube_player_iframe: ^6.0.2
+  url_launcher: ^6.3.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
