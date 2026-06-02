@@ -1,4 +1,4 @@
-package com.example.hybrid_music_room
+package com.amglogicalis.djunity
 
 import io.flutter.embedding.android.FlutterActivity
 
