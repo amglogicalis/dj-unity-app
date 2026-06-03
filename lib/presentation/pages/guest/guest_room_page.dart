@@ -599,7 +599,7 @@ class _GuestRoomPageState extends State<GuestRoomPage> {
         .snapshots();
 
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      backgroundColor: const Color(0xFF0F0F11),
       appBar: AppBar(
         title: Row(
           mainAxisSize: MainAxisSize.min,
