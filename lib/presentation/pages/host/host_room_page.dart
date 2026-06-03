@@ -1060,7 +1060,6 @@ class _HostRoomPageState extends State<HostRoomPage> {
                     return LayoutBuilder(
                       builder: (context, constraints) {
                         // Card más pequeño — la info está debajo, no dentro
-                        final playerH = (constraints.maxHeight * 0.22).clamp(110.0, 170.0);
 
                         return Padding(
                           padding: const EdgeInsets.symmetric(
@@ -1079,8 +1078,10 @@ class _HostRoomPageState extends State<HostRoomPage> {
                                     currentData?['artist'] as String? ?? ''),
 
                               // ── Reproductor visual (solo imagen/video) ────
-                              _buildPlayerCard(hasSongs, thumbnail,
-                                  height: playerH),
+                              AspectRatio(
+                                aspectRatio: 16 / 9,
+                                child: _buildPlayerCard(hasSongs, thumbnail),
+                              ),
 
                               // ── Info canción (fuera del Stack/iframe) ─────
                               _buildSongInfo(hasSongs, title, artist),
@@ -1218,7 +1219,7 @@ class _HostRoomPageState extends State<HostRoomPage> {
   // La info de canción y la barra de progreso están FUERA del Stack,
   // así el Slider no compite con el iframe de YouTube por los eventos.
   Widget _buildPlayerCard(bool hasSongs, String thumbnail,
-      {double height = 160}) {
+      {double? height}) {
     return Container(
       height: height,
       decoration: BoxDecoration(
