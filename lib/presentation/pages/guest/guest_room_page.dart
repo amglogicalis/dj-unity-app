@@ -102,7 +102,51 @@ class _GuestRoomPageState extends State<GuestRoomPage> {
         throw Exception('Servidor de iTunes respondió con código ${response.statusCode}');
       }
     } catch (e) {
-      // Fallback local en caso de error de red
+      debugPrint('Error de búsqueda directa en iTunes: $e. Intentando vía proxy allorigins...');
+      try {
+        final itunesUrl = 'https://itunes.apple.com/search?term=${Uri.encodeComponent(cleanQuery)}&media=music&limit=15';
+        final proxyUrl = 'https://api.allorigins.win/get?url=${Uri.encodeComponent(itunesUrl)}';
+        final response = await http.get(Uri.parse(proxyUrl)).timeout(const Duration(seconds: 8));
+
+        if (response.statusCode == 200) {
+          final outerData = jsonDecode(response.body) as Map<String, dynamic>;
+          final contents = outerData['contents'] as String;
+          final data = jsonDecode(contents) as Map<String, dynamic>;
+          final results = data['results'] as List<dynamic>? ?? [];
+          final List<GuestSongMock> tempResults = [];
+
+          for (var item in results) {
+            if (item is Map<String, dynamic>) {
+              final trackName = item['trackName'] as String? ?? 'Canción sin título';
+              final artistName = item['artistName'] as String? ?? 'Artista desconocido';
+              final artworkUrl = item['artworkUrl100'] as String? ?? '';
+              final trackId = item['trackId']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString();
+
+              tempResults.add(
+                GuestSongMock(
+                  title: trackName,
+                  artist: artistName,
+                  platform: 'itunes',
+                  videoId: trackId,
+                  thumbnailUrl: artworkUrl,
+                ),
+              );
+            }
+          }
+
+          if (tempResults.isNotEmpty) {
+            setState(() {
+              _searchResults = tempResults;
+              _isLoading = false;
+            });
+            return;
+          }
+        }
+      } catch (proxyError) {
+        debugPrint('Búsqueda vía proxy también falló: $proxyError');
+      }
+
+      // Fallback local en caso de que todo falle
       final List<GuestSongMock> fallbackResults = [];
       final capitalizedQuery = cleanQuery.split(' ').map((w) {
         if (w.isEmpty) return '';
@@ -133,7 +177,7 @@ class _GuestRoomPageState extends State<GuestRoomPage> {
         _isLoading = false;
       });
 
-      debugPrint('Error de búsqueda en iTunes: $e. Activando resultados locales.');
+      debugPrint('Activando resultados locales de fallback.');
     }
   }
 
