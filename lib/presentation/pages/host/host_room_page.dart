@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:youtube_player_iframe/youtube_player_iframe.dart';
 import 'package:hybrid_music_room/data/models/room_mode.dart';
@@ -64,6 +67,345 @@ class _HostRoomPageState extends State<HostRoomPage> {
   bool _ytPlayerReady = false;
   bool _ytSearching = false;
 
+  // ── DJ: añadir canciones a la cola ────────────────────────
+  final TextEditingController _djSearchController = TextEditingController();
+  List<Map<String, String>> _djSearchResults = [];
+  bool _djIsSearching = false;
+  Timer? _djDebounce;
+
+  // ───────────────────────────────────────────────────────────────
+  // DJ: AÑADIR CANCIONES A LA COLA
+  // ───────────────────────────────────────────────────────────────
+
+  /// Abre el bottom sheet para que el DJ busque y añada canciones a la cola.
+  void _showAddSongBottomSheet() {
+    _djSearchController.clear();
+    _djSearchResults = [];
+    _djIsSearching = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            // Búsqueda con debounce de 600ms
+            void onQueryChanged(String q) {
+              _djDebounce?.cancel();
+              _djDebounce = Timer(const Duration(milliseconds: 600), () async {
+                final query = q.trim();
+                if (query.isEmpty) {
+                  setSheetState(() {
+                    _djSearchResults = [];
+                    _djIsSearching = false;
+                  });
+                  return;
+                }
+                setSheetState(() => _djIsSearching = true);
+
+                try {
+                  final List<Map<String, String>> results = await _djSearchMusicBrainz(query);
+                  if (ctx.mounted) {
+                    setSheetState(() {
+                      _djSearchResults = results;
+                      _djIsSearching = false;
+                    });
+                  }
+                } catch (e) {
+                  debugPrint('DJ search error: $e');
+                  if (ctx.mounted) setSheetState(() => _djIsSearching = false);
+                }
+              });
+            }
+
+            return Container(
+              height: MediaQuery.of(ctx).size.height * 0.85,
+              decoration: const BoxDecoration(
+                color: Color(0xFF0F0F11),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+              ),
+              child: Column(
+                children: [
+                  // Handle
+                  Container(
+                    margin: const EdgeInsets.only(top: 12, bottom: 8),
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  // Título
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: _modeAccentColor.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(Icons.add_rounded,
+                              color: _modeAccentColor, size: 20),
+                        ),
+                        const SizedBox(width: 12),
+                        const Text(
+                          'Añadir canción',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Campo de búsqueda
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: TextField(
+                      controller: _djSearchController,
+                      autofocus: true,
+                      onChanged: onQueryChanged,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        hintText: 'Buscar canción o artista...',
+                        hintStyle: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.3)),
+                        prefixIcon: Icon(Icons.search_rounded,
+                            color: Colors.white.withValues(alpha: 0.5)),
+                        suffixIcon: _djIsSearching
+                            ? Padding(
+                                padding: const EdgeInsets.all(14),
+                                child: SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    color: _modeAccentColor,
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                              )
+                            : null,
+                        filled: true,
+                        fillColor: Colors.white.withValues(alpha: 0.04),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide.none,
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(
+                              color: Colors.white.withValues(alpha: 0.06)),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide:
+                              BorderSide(color: _modeAccentColor, width: 1.5),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  // Resultados
+                  Expanded(
+                    child: _djSearchResults.isEmpty && !_djIsSearching
+                        ? Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.queue_music_rounded,
+                                    size: 52,
+                                    color:
+                                        Colors.white.withValues(alpha: 0.1)),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'Escribe para buscar',
+                                  style: TextStyle(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.4),
+                                      fontSize: 15),
+                                ),
+                              ],
+                            ),
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 4),
+                            itemCount: _djSearchResults.length,
+                            itemBuilder: (_, i) {
+                              final song = _djSearchResults[i];
+                              final thumb = song['thumbnailUrl'] ?? '';
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.02),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.05)),
+                                ),
+                                child: ListTile(
+                                  leading: ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: thumb.isNotEmpty
+                                        ? Image.network(
+                                            thumb,
+                                            width: 55,
+                                            height: 40,
+                                            fit: BoxFit.cover,
+                                            errorBuilder:
+                                                (_, __, ___) =>
+                                                    _thumbPlaceholder(),
+                                          )
+                                        : _thumbPlaceholder(),
+                                  ),
+                                  title: Text(
+                                    song['title'] ?? '',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold),
+                                  ),
+                                  subtitle: Text(
+                                    song['artist'] ?? '',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                        color:
+                                            Colors.white.withValues(alpha: 0.6)),
+                                  ),
+                                  trailing: IconButton(
+                                    icon: Icon(Icons.add_circle_rounded,
+                                        color: _modeAccentColor, size: 28),
+                                    onPressed: () async {
+                                      Navigator.pop(ctx);
+                                      await _djAddSongToQueue(song);
+                                    },
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                  // Padding para el teclado
+                  SizedBox(
+                      height: MediaQuery.of(ctx).viewInsets.bottom + 16),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// Busca canciones usando MusicBrainz (catálogo completo).
+  /// Misma lógica que guest_room_page.dart para consistencia.
+  Future<List<Map<String, String>>> _djSearchMusicBrainz(String query) async {
+    final encodedQuery = Uri.encodeComponent(query);
+    final mbUrl =
+        'https://musicbrainz.org/ws/2/recording?query=$encodedQuery&fmt=json&limit=25';
+
+    http.Response response;
+    if (kIsWeb) {
+      final proxiedUrl = Uri.parse(
+        'https://api.codetabs.com/v1/proxy?quest=${Uri.encodeComponent(mbUrl)}',
+      );
+      response = await http.get(proxiedUrl).timeout(const Duration(seconds: 12));
+    } else {
+      response = await http.get(
+        Uri.parse(mbUrl),
+        headers: {
+          'User-Agent': 'DemocraticDJ/1.0 (https://democratic-dj-fe97d.web.app)',
+          'Accept': 'application/json',
+        },
+      ).timeout(const Duration(seconds: 12));
+    }
+
+    if (response.statusCode != 200) {
+      throw Exception('MusicBrainz status ${response.statusCode}');
+    }
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final recordings = data['recordings'] as List<dynamic>? ?? [];
+    final results = <Map<String, String>>[];
+    final seen = <String>{};
+
+    for (final recording in recordings) {
+      if (recording is! Map<String, dynamic>) continue;
+      final score = recording['score'] as int? ?? 0;
+      if (score < 30) continue;
+
+      final title = recording['title'] as String? ?? '';
+      if (title.isEmpty) continue;
+
+      final artistCredits = recording['artist-credit'] as List<dynamic>? ?? [];
+      final artistParts = <String>[];
+      for (final credit in artistCredits) {
+        if (credit is Map<String, dynamic>) {
+          final artist = credit['artist'] as Map<String, dynamic>?;
+          final name = artist?['name'] as String?;
+          if (name != null && name.isNotEmpty) artistParts.add(name);
+          final joinPhrase = credit['joinphrase'] as String? ?? '';
+          if (joinPhrase.isNotEmpty && artistParts.isNotEmpty) {
+            artistParts.last = artistParts.last + joinPhrase;
+          }
+        }
+      }
+      final artistName = artistParts.join(' ').trim();
+      if (artistName.isEmpty) continue;
+
+      final key = '${title.toLowerCase()}|${artistName.toLowerCase()}';
+      if (seen.contains(key)) continue;
+      seen.add(key);
+
+      final releases = recording['releases'] as List<dynamic>? ?? [];
+      String thumbnailUrl = '';
+      if (releases.isNotEmpty && releases.first is Map<String, dynamic>) {
+        final releaseId =
+            (releases.first as Map<String, dynamic>)['id'] as String? ?? '';
+        if (releaseId.isNotEmpty) {
+          thumbnailUrl =
+              'https://coverartarchive.org/release/$releaseId/front-250';
+        }
+      }
+
+      results.add({
+        'title': title,
+        'artist': artistName,
+        'thumbnailUrl': thumbnailUrl,
+        'mbid': recording['id'] as String? ?? '',
+      });
+    }
+    return results;
+  }
+
+  /// Añade la canción seleccionada a la cola de Firestore del DJ.
+  Future<void> _djAddSongToQueue(Map<String, String> song) async {
+    if (_pin.isEmpty) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection('rooms')
+          .doc(_pin)
+          .collection('playlist')
+          .add({
+        'title': song['title'] ?? '',
+        'artist': song['artist'] ?? '',
+        'platform': 'musicbrainz',
+        'videoOrTrackId': song['mbid'] ?? '',
+        'thumbnailUrl': song['thumbnailUrl'] ?? '',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      _showInfo('"${song['title']}" añadida a la cola 🎧');
+    } catch (e) {
+      _showError('Error al añadir canción: $e');
+    }
+  }
 
   @override
   void initState() {
@@ -82,6 +424,8 @@ class _HostRoomPageState extends State<HostRoomPage> {
     _ytValueSubscription?.cancel();
     _ytController?.close();
     _progressNotifier.dispose();
+    _djSearchController.dispose();
+    _djDebounce?.cancel();
     super.dispose();
   }
 
@@ -1183,12 +1527,39 @@ class _HostRoomPageState extends State<HostRoomPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('SIGUIENTE EN LA COLA',
-              style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.5,
-                  color: Colors.grey)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('SIGUIENTE EN LA COLA',
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.5,
+                      color: Colors.grey)),
+              // Botón para que el DJ añada canciones él mismo
+              TextButton.icon(
+                onPressed: _showAddSongBottomSheet,
+                icon: Icon(Icons.add_rounded, size: 16, color: _modeAccentColor),
+                label: Text(
+                  'AÑADIR',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: _modeAccentColor,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  backgroundColor: _modeAccentColor.withValues(alpha: 0.08),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 12),
           Expanded(
             child: snapshot.connectionState == ConnectionState.waiting

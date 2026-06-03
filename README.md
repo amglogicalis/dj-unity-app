@@ -78,4 +78,4 @@ flutter run
 
 ---
 
-*Desarrollado con ❤️ por AMGLogicalis*
+*Desarrollado por AMGLogicalis*
