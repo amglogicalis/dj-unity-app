@@ -4,31 +4,23 @@ import 'package:http/http.dart' as http;
 
 /// Servicio de búsqueda de videos de YouTube.
 ///
-/// Estrategia optimizada para Web (PWA) y Móvil:
-///
-///   Por cada variante de query:
-///     1. YouTube scraping vía proxy allorigins/codetabs (más rápido y fiable, ~330ms)
-///     2. Piped API (fallback)
-///     3. Invidious API (fallback)
-///
-/// Para Web (PWA), todas las llamadas externas usan el proxy 'allorigins' con su endpoint
-/// JSON (/get) para evitar que Cloudflare bloquee la petición por CORS y cabeceras de origen.
-/// El check oEmbed se desactiva en Web porque los proxies de CORS añaden lentitud e
-/// inestabilidad; el reproductor iFrame ya maneja los errores si un vídeo no es reproducible.
+/// Estrategia:
+///   - En WEB: llama a la Firebase Cloud Function `searchYoutube`
+///     (servidor propio → sin CORS, sin bloqueos antibot de YouTube).
+///   - En MÓVIL: scraping directo de YouTube + fallback Piped + Invidious,
+///     con verificación de embeddability vía oEmbed.
 class YouTubeService {
-  static const _timeout = Duration(seconds: 8);
-
-  /// Máximo de candidatos a evaluar por búsqueda.
+  static const _timeout = Duration(seconds: 15);
   static const _maxCandidates = 5;
 
-  // Instancias públicas de Piped
+  // Instancias públicas de Piped (solo móvil)
   static const _pipedInstances = [
     'https://pipedapi.in.projectsegfau.lt',
     'https://pipedapi.adminforge.de',
     'https://pipedapi.kavin.rocks',
   ];
 
-  // Instancias públicas de Invidious
+  // Instancias públicas de Invidious (solo móvil)
   static const _invidiousInstances = [
     'https://iv.ggtyler.dev',
     'https://invidious.slipfox.xyz',
@@ -41,6 +33,104 @@ class YouTubeService {
 
   /// Busca el videoId de YouTube para una canción.
   Future<String?> searchVideo(String title, String artist) async {
+    if (kIsWeb) {
+      return _searchWeb(title, artist);
+    } else {
+      return _searchMobile(title, artist);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // WEB: CORS Scrape & Invidious API
+  // ─────────────────────────────────────────────────────────────
+
+  Future<String?> _searchWeb(String title, String artist) async {
+    final cleanTitle = _cleanTitle(title);
+
+    final queries = [
+      '$artist $cleanTitle',
+      '$artist $title',
+      '$artist $cleanTitle - Topic',
+      '$artist $cleanTitle official audio',
+    ];
+
+    for (final q in queries) {
+      // 1. YouTube Scraping a través del proxy CORS codetabs (muy fiable)
+      final idScrape = await _searchYoutubeScrapeWeb(q);
+      if (idScrape != null) {
+        debugPrint('YT (Web) ✓ Scrape: $idScrape (query: "$q")');
+        return idScrape;
+      }
+
+      // 2. Fallback: Invidious API directa con soporte CORS (inv.thepixora.com)
+      final idInvidious = await _searchInvidiousWeb(q);
+      if (idInvidious != null) {
+        debugPrint('YT (Web) ✓ Invidious: $idInvidious (query: "$q")');
+        return idInvidious;
+      }
+    }
+
+    debugPrint('YT (Web) ✗ No se encontró video para "$artist $title"');
+    return null;
+  }
+
+  Future<String?> _searchYoutubeScrapeWeb(String query) async {
+    final ytSearchUrl =
+        'https://www.youtube.com/results?search_query=${Uri.encodeComponent(query)}';
+    final proxyUrl =
+        'https://api.codetabs.com/v1/proxy?quest=${Uri.encodeComponent(ytSearchUrl)}';
+
+    try {
+      final resp = await http.get(Uri.parse(proxyUrl)).timeout(_timeout);
+      if (resp.statusCode != 200) return null;
+
+      final body = resp.body;
+      final seen = <String>{};
+      final ids = <String>[];
+      final pattern = RegExp(r'"videoId":"([a-zA-Z0-9_-]{11})"');
+
+      for (final match in pattern.allMatches(body)) {
+        if (ids.length >= _maxCandidates) break;
+        final id = match.group(1)!;
+        if (id != 'undefined' && id.length == 11 && seen.add(id)) {
+          ids.add(id);
+        }
+      }
+
+      if (ids.isNotEmpty) return ids.first;
+    } catch (e) {
+      debugPrint('YT (Web) Scrape error: $e');
+    }
+    return null;
+  }
+
+  Future<String?> _searchInvidiousWeb(String query) async {
+    // Usamos inv.thepixora.com que tiene soporte CORS verificado y está online
+    final url =
+        'https://inv.thepixora.com/api/v1/search?q=${Uri.encodeComponent(query)}&type=video&fields=videoId';
+    try {
+      final resp = await http.get(Uri.parse(url)).timeout(_timeout);
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body);
+        if (data is List && data.isNotEmpty) {
+          final first = data.first;
+          if (first is Map) {
+            final vid = first['videoId'] as String?;
+            if (vid != null && vid.length == 11) return vid;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('YT (Web) Invidious error: $e');
+    }
+    return null;
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // MÓVIL: Scraping directo + Piped + Invidious
+  // ─────────────────────────────────────────────────────────────
+
+  Future<String?> _searchMobile(String title, String artist) async {
     final cleanTitle = _cleanTitle(title);
 
     final queries = [
@@ -51,14 +141,14 @@ class YouTubeService {
     ];
 
     for (final query in queries) {
-      // 1. YouTube Scraping (Es el método más rápido y fiable, funciona en ~330ms)
+      // 1. YouTube Scraping directo
       final idScrape = await _searchYoutubeScrape(query);
       if (idScrape != null) {
         debugPrint('YT ✓ Scrape: $idScrape (query: "$query")');
         return idScrape;
       }
 
-      // 2. Piped API (Instancias redundantes)
+      // 2. Piped API
       final idPiped = await _searchPiped(query);
       if (idPiped != null) {
         debugPrint('YT ✓ Piped: $idPiped (query: "$query")');
@@ -78,53 +168,14 @@ class YouTubeService {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // HELPER DE CONSULTA HTTP CON PROXY AUTOMÁTICO (CORS BYPASS)
+  // VERIFICACIÓN DE EMBEDDABILITY (solo móvil)
   // ─────────────────────────────────────────────────────────────
 
-  /// Realiza la consulta HTTP gestionando de forma transparente las políticas CORS.
-  /// En Web: utiliza el proxy JSON allorigins (o fallback codetabs).
-  /// En Móvil: realiza la petición directa.
-  Future<String?> _fetchBody(String url, {Map<String, String>? headers}) async {
-    try {
-      if (!kIsWeb) {
-        // Móvil: directo sin proxy
-        final resp = await http.get(Uri.parse(url), headers: headers).timeout(_timeout);
-        if (resp.statusCode == 200) return resp.body;
-        return null;
-      }
-
-      // Web: Proxy principal -> allorigins /get (retorna JSON para saltar Cloudflare browser integrity)
-      final proxyUrl = 'https://api.allorigins.win/get?url=${Uri.encodeComponent(url)}';
-      final resp = await http.get(Uri.parse(proxyUrl)).timeout(_timeout);
-      if (resp.statusCode == 200) {
-        final data = jsonDecode(resp.body) as Map<String, dynamic>;
-        return data['contents'] as String?;
-      }
-
-      // Web: Proxy de soporte -> codetabs
-      final backupUrl = 'https://api.codetabs.com/v1/proxy?quest=${Uri.encodeComponent(url)}';
-      final respBackup = await http.get(Uri.parse(backupUrl)).timeout(_timeout);
-      if (respBackup.statusCode == 200) {
-        return respBackup.body;
-      }
-    } catch (e) {
-      debugPrint('Error de red/proxy al consultar ($url): $e');
-    }
-    return null;
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // VERIFICACIÓN DE EMBEDDABILITY (solo para móvil)
-  // ─────────────────────────────────────────────────────────────
-
-  /// Comprueba si el vídeo permite reproducción embebida (solo móvil).
-  /// En Web siempre retorna true para evitar cuellos de botella por CORS.
   Future<bool> _isEmbeddable(String videoId) async {
-    if (kIsWeb) return true;
-
     const oembedBase = 'https://www.youtube.com/oembed';
     final videoUrl = 'https://www.youtube.com/watch?v=$videoId';
-    final checkUrl = '$oembedBase?url=${Uri.encodeComponent(videoUrl)}&format=json';
+    final checkUrl =
+        '$oembedBase?url=${Uri.encodeComponent(videoUrl)}&format=json';
 
     try {
       final resp = await http
@@ -140,7 +191,7 @@ class YouTubeService {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // METODO 1: Scraping YouTube
+  // MÉTODO 1 (Móvil): Scraping YouTube
   // ─────────────────────────────────────────────────────────────
 
   Future<String?> _searchYoutubeScrape(String query) async {
@@ -156,37 +207,37 @@ class YouTubeService {
 
   Future<List<String>> _fetchScrapeCandidates(String url) async {
     final ids = <String>[];
-    final headers = !kIsWeb
-        ? {
-            'User-Agent':
-                'Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36 Chrome/91 Mobile Safari/537.36',
+    try {
+      final resp = await http.get(Uri.parse(url), headers: {
+        'User-Agent':
+            'Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36 Chrome/91 Mobile Safari/537.36',
+      }).timeout(_timeout);
+
+      if (resp.statusCode != 200) return ids;
+
+      final body = resp.body;
+      final seen = <String>{};
+      for (final pattern in [
+        RegExp(r'"videoId":"([a-zA-Z0-9_-]{11})"'),
+        RegExp(r'watch\?v=([a-zA-Z0-9_-]{11})'),
+      ]) {
+        for (final match in pattern.allMatches(body)) {
+          if (ids.length >= _maxCandidates) break;
+          final id = match.group(1)!;
+          if (id != 'undefined' && id.length == 11 && seen.add(id)) {
+            ids.add(id);
           }
-        : <String, String>{};
-
-    final body = await _fetchBody(url, headers: headers);
-    if (body == null || body.isEmpty) return ids;
-
-    final seen = <String>{};
-    for (final pattern in [
-      RegExp(r'"videoId":"([a-zA-Z0-9_-]{11})"'),
-      RegExp(r'watch\?v=([a-zA-Z0-9_-]{11})'),
-      RegExp(r'"video_id":"([a-zA-Z0-9_-]{11})"'),
-      RegExp(r'/embed/([a-zA-Z0-9_-]{11})'),
-    ]) {
-      for (final match in pattern.allMatches(body)) {
-        if (ids.length >= _maxCandidates) break;
-        final id = match.group(1)!;
-        if (id != 'undefined' && id.length == 11 && seen.add(id)) {
-          ids.add(id);
         }
+        if (ids.length >= _maxCandidates) break;
       }
-      if (ids.length >= _maxCandidates) break;
+    } catch (e) {
+      debugPrint('YT scrape error: $e');
     }
     return ids;
   }
 
   // ─────────────────────────────────────────────────────────────
-  // METODO 2: Piped API
+  // MÉTODO 2 (Móvil): Piped API
   // ─────────────────────────────────────────────────────────────
 
   Future<String?> _searchPiped(String query) async {
@@ -194,10 +245,7 @@ class YouTubeService {
       for (final base in _pipedInstances) {
         final pipedUrl =
             '$base/search?q=${Uri.encodeComponent(query)}&filter=$filter';
-
         final candidates = await _fetchPipedCandidates(pipedUrl);
-        if (candidates.isEmpty) continue;
-
         for (final id in candidates) {
           if (await _isEmbeddable(id)) return id;
         }
@@ -208,22 +256,22 @@ class YouTubeService {
 
   Future<List<String>> _fetchPipedCandidates(String url) async {
     final ids = <String>[];
-    final body = await _fetchBody(url, headers: {'Accept': 'application/json'});
-    if (body == null || body.isEmpty) return ids;
-
     try {
-      final data = jsonDecode(body);
-      if (data is! Map) return ids;
+      final resp = await http
+          .get(Uri.parse(url), headers: {'Accept': 'application/json'})
+          .timeout(_timeout);
+      if (resp.statusCode != 200) return ids;
 
+      final data = jsonDecode(resp.body);
+      if (data is! Map) return ids;
       final items = data['items'] as List? ?? [];
       for (final item in items) {
         if (ids.length >= _maxCandidates) break;
         if (item is! Map) continue;
-
         final watchUrl = item['url'] as String? ?? '';
         final match =
             RegExp(r'[?&]v=([a-zA-Z0-9_-]{11})').firstMatch(watchUrl) ??
-            RegExp(r'/watch\?v=([a-zA-Z0-9_-]{11})').firstMatch(watchUrl);
+                RegExp(r'/watch\?v=([a-zA-Z0-9_-]{11})').firstMatch(watchUrl);
         if (match != null) {
           ids.add(match.group(1)!);
           continue;
@@ -238,35 +286,30 @@ class YouTubeService {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // METODO 3: Invidious API
+  // MÉTODO 3 (Móvil): Invidious API
   // ─────────────────────────────────────────────────────────────
 
   Future<String?> _searchInvidious(String query) async {
     for (final base in _invidiousInstances) {
       final invUrl =
           '$base/api/v1/search?q=${Uri.encodeComponent(query)}&type=video&fields=videoId';
+      try {
+        final resp = await http
+            .get(Uri.parse(invUrl), headers: {'Accept': 'application/json'})
+            .timeout(_timeout);
+        if (resp.statusCode != 200) continue;
 
-      final id = await _fetchInvidious(invUrl);
-      if (id != null && await _isEmbeddable(id)) return id;
-    }
-    return null;
-  }
-
-  Future<String?> _fetchInvidious(String url) async {
-    final body = await _fetchBody(url, headers: {'Accept': 'application/json'});
-    if (body == null || body.isEmpty) return null;
-
-    try {
-      final data = jsonDecode(body);
-      if (data is! List || data.isEmpty) return null;
-
-      final first = data.first;
-      if (first is! Map) return null;
-
-      final vid = first['videoId'] as String?;
-      if (vid != null && vid.length == 11) return vid;
-    } catch (e) {
-      debugPrint('Invidious parse error: $e');
+        final data = jsonDecode(resp.body);
+        if (data is! List || data.isEmpty) continue;
+        final first = data.first;
+        if (first is! Map) continue;
+        final vid = first['videoId'] as String?;
+        if (vid != null && vid.length == 11 && await _isEmbeddable(vid)) {
+          return vid;
+        }
+      } catch (e) {
+        debugPrint('Invidious error ($base): $e');
+      }
     }
     return null;
   }

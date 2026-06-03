@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
 
@@ -66,43 +67,88 @@ class _GuestRoomPageState extends State<GuestRoomPage> {
     });
 
     try {
-      final response = await http.get(
-        Uri.parse('https://itunes.apple.com/search?term=${Uri.encodeComponent(cleanQuery)}&media=music&limit=15'),
-      );
+      if (kIsWeb) {
+        // En Web, usamos el proxy CORS de codetabs para evitar problemas de CORS e integridad del navegador
+        final targetUrl = 'https://itunes.apple.com/search?term=${Uri.encodeComponent(cleanQuery)}&media=music&limit=15';
+        final url = Uri.parse(
+          'https://api.codetabs.com/v1/proxy?quest=${Uri.encodeComponent(targetUrl)}',
+        );
+        debugPrint('Búsqueda iTunes (Web) → Proxy Codetabs: "$cleanQuery"');
+        final response = await http.get(url).timeout(const Duration(seconds: 10));
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        final results = data['results'] as List<dynamic>? ?? [];
-        final List<GuestSongMock> tempResults = [];
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          final results = data['results'] as List<dynamic>? ?? [];
+          final List<GuestSongMock> tempResults = [];
 
-        for (var item in results) {
-          if (item is Map<String, dynamic>) {
-            final trackName = item['trackName'] as String? ?? 'Canción sin título';
-            final artistName = item['artistName'] as String? ?? 'Artista desconocido';
-            final artworkUrl = item['artworkUrl100'] as String? ?? '';
-            final trackId = item['trackId']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString();
+          for (var item in results) {
+            if (item is Map<String, dynamic>) {
+              final trackName = item['trackName'] as String? ?? 'Canción sin título';
+              final artistName = item['artistName'] as String? ?? 'Artista desconocido';
+              final artworkUrl = item['artworkUrl100'] as String? ?? '';
+              final trackId = item['trackId']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString();
 
-            tempResults.add(
-              GuestSongMock(
-                title: trackName,
-                artist: artistName,
-                platform: 'itunes',
-                videoId: trackId,
-                thumbnailUrl: artworkUrl,
-              ),
-            );
+              tempResults.add(
+                GuestSongMock(
+                  title: trackName,
+                  artist: artistName,
+                  platform: 'itunes',
+                  videoId: trackId,
+                  thumbnailUrl: artworkUrl,
+                ),
+              );
+            }
           }
-        }
 
-        setState(() {
-          _searchResults = tempResults;
-          _isLoading = false;
-        });
+          setState(() {
+            _searchResults = tempResults;
+            _isLoading = false;
+          });
+          return;
+        } else {
+          throw Exception('Proxy Codetabs devolvió status ${response.statusCode}');
+        }
       } else {
-        throw Exception('Servidor de iTunes respondió con código ${response.statusCode}');
+        // En Móvil, podemos seguir haciendo la consulta directa a iTunes
+        final response = await http.get(
+          Uri.parse('https://itunes.apple.com/search?term=${Uri.encodeComponent(cleanQuery)}&media=music&limit=15'),
+        );
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          final results = data['results'] as List<dynamic>? ?? [];
+          final List<GuestSongMock> tempResults = [];
+
+          for (var item in results) {
+            if (item is Map<String, dynamic>) {
+              final trackName = item['trackName'] as String? ?? 'Canción sin título';
+              final artistName = item['artistName'] as String? ?? 'Artista desconocido';
+              final artworkUrl = item['artworkUrl100'] as String? ?? '';
+              final trackId = item['trackId']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString();
+
+              tempResults.add(
+                GuestSongMock(
+                  title: trackName,
+                  artist: artistName,
+                  platform: 'itunes',
+                  videoId: trackId,
+                  thumbnailUrl: artworkUrl,
+                ),
+              );
+            }
+          }
+
+          setState(() {
+            _searchResults = tempResults;
+            _isLoading = false;
+          });
+          return;
+        } else {
+          throw Exception('Servidor de iTunes respondió con código ${response.statusCode}');
+        }
       }
     } catch (e) {
-      debugPrint('Error de búsqueda directa en iTunes: $e. Intentando vía proxy allorigins...');
+      debugPrint('Error de búsqueda en iTunes: $e. Intentando vía proxy allorigins como fallback...');
       try {
         final itunesUrl = 'https://itunes.apple.com/search?term=${Uri.encodeComponent(cleanQuery)}&media=music&limit=15';
         final proxyUrl = 'https://api.allorigins.win/get?url=${Uri.encodeComponent(itunesUrl)}';
