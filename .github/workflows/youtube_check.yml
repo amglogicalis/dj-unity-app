@@ -1,0 +1,26 @@
+name: YouTube Stream Extraction Check
+
+on:
+  schedule:
+    # Se ejecuta todos los días a las 08:00 UTC (9:00 AM o 10:00 AM en España según el horario)
+    - cron: '0 8 * * *'
+  workflow_dispatch: # Permite activar el test manualmente desde la web de GitHub
+
+jobs:
+  check-youtube:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Dart SDK
+        uses: actions/setup-dart@v1
+        with:
+          sdk: 'stable'
+
+      - name: Install dependencies
+        run: dart pub get
+
+      - name: Run YouTube extraction test
+        run: dart bin/test_youtube.dart
