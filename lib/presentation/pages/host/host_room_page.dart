@@ -1181,16 +1181,9 @@ class _HostRoomPageState extends State<HostRoomPage> {
             if (_mode == RoomMode.youtubeIntegrated && _ytController != null)
               Positioned.fill(
                 child: IgnorePointer(
-                  child: FittedBox(
-                    fit: BoxFit.cover,
-                    child: SizedBox(
-                      width: 640,
-                      height: 360,
-                      child: YoutubePlayer(
-                        controller: _ytController!,
-                        aspectRatio: 16 / 9,
-                      ),
-                    ),
+                  child: YoutubePlayer(
+                    controller: _ytController!,
+                    aspectRatio: 16 / 9,
                   ),
                 ),
               ),
