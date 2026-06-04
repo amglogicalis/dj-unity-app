@@ -1010,44 +1010,49 @@ class _HostRoomPageState extends State<HostRoomPage> {
                       builder: (context, constraints) {
                         // Card más pequeño — la info está debajo, no dentro
 
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 20.0, vertical: 8.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              // ── Código de sala ──────────────────────────
-                              _buildRoomCodeCard(),
-                              const SizedBox(height: 8),
+                        return Center(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 600),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 20.0, vertical: 8.0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  // ── Código de sala ──────────────────────────
+                                  _buildRoomCodeCard(),
+                                  const SizedBox(height: 8),
 
-                              // ── Banner modo Spotify Free ─────────────────
-                              if (_mode == RoomMode.spotifyFree && hasSongs)
-                                _buildSpotifyFreeBanner(
-                                    currentData?['title'] as String? ?? '',
-                                    currentData?['artist'] as String? ?? ''),
+                                  // ── Banner modo Spotify Free ─────────────────
+                                  if (_mode == RoomMode.spotifyFree && hasSongs)
+                                    _buildSpotifyFreeBanner(
+                                        currentData?['title'] as String? ?? '',
+                                        currentData?['artist'] as String? ?? ''),
 
-                              // ── Reproductor visual (solo imagen/video) ────
-                              AspectRatio(
-                                aspectRatio: 16 / 9,
-                                child: _buildPlayerCard(hasSongs, thumbnail),
+                                  // ── Reproductor visual (solo imagen/video) ────
+                                  AspectRatio(
+                                    aspectRatio: 16 / 9,
+                                    child: _buildPlayerCard(hasSongs, thumbnail),
+                                  ),
+
+                                  // ── Info canción (fuera del Stack/iframe) ─────
+                                  _buildSongInfo(hasSongs, title, artist),
+
+                                  // ── Barra de progreso (fuera del iframe!) ─────
+                                  if (_mode != RoomMode.spotifyFree)
+                                    _buildProgressBarWidget(hasSongs),
+
+                                  const SizedBox(height: 4),
+
+                                  // ── Controles ───────────────────────────────
+                                  _buildControls(hasSongs),
+                                  const SizedBox(height: 8),
+
+                                  // ── Cola ────────────────────────────────────
+                                  _buildQueueSection(snapshot, docs, hasSongs),
+                                ],
                               ),
-
-                              // ── Info canción (fuera del Stack/iframe) ─────
-                              _buildSongInfo(hasSongs, title, artist),
-
-                              // ── Barra de progreso (fuera del iframe!) ─────
-                              if (_mode != RoomMode.spotifyFree)
-                                _buildProgressBarWidget(hasSongs),
-
-                              const SizedBox(height: 4),
-
-                              // ── Controles ───────────────────────────────
-                              _buildControls(hasSongs),
-                              const SizedBox(height: 8),
-
-                              // ── Cola ────────────────────────────────────
-                              _buildQueueSection(snapshot, docs, hasSongs),
-                            ],
+                            ),
                           ),
                         );
                       },
