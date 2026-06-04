@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 /// Pantalla de inicio (Home) que permite al usuario
 /// iniciar una sala como Host (DJ) o unirse a una como Guest mediante PIN.
@@ -13,6 +14,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final TextEditingController _pinController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
+  bool _isLoading = false;
 
   @override
   void dispose() {
@@ -20,10 +22,52 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
-  void _joinRoom() {
+  void _joinRoom() async {
     if (_formKey.currentState!.validate()) {
       final pin = _pinController.text;
-      Navigator.pushNamed(context, '/guest', arguments: pin);
+      setState(() {
+        _isLoading = true;
+      });
+      try {
+        final doc = await FirebaseFirestore.instance
+            .collection('rooms')
+            .doc(pin)
+            .get();
+        if (!mounted) return;
+        if (doc.exists) {
+          Navigator.pushNamed(context, '/guest', arguments: pin);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text(
+                'La sala introducida no existe',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+              backgroundColor: Colors.redAccent,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          );
+        }
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Error al conectar: $e',
+              style: const TextStyle(color: Colors.white),
+            ),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
+      }
     }
   }
 
@@ -61,10 +105,10 @@ class _HomePageState extends State<HomePage> {
                         padding: const EdgeInsets.all(20),
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: const Color(0xFFC42261).withOpacity(0.08),
+                          color: const Color(0xFFC42261).withValues(alpha: 0.08),
                           boxShadow: [
                             BoxShadow(
-                              color: const Color(0xFFC42261).withOpacity(0.15),
+                              color: const Color(0xFFC42261).withValues(alpha: 0.15),
                               blurRadius: 30,
                               spreadRadius: 5,
                             )
@@ -79,7 +123,7 @@ class _HomePageState extends State<HomePage> {
                     ),
                     const SizedBox(height: 32),
                     const Text(
-                      'HYBRID MUSIC ROOM',
+                      'DJ UNITY',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 28,
@@ -94,7 +138,7 @@ class _HomePageState extends State<HomePage> {
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 14,
-                        color: Colors.white.withOpacity(0.6),
+                        color: Colors.white.withValues(alpha: 0.6),
                       ),
                     ),
                     const SizedBox(height: 48),
@@ -102,10 +146,10 @@ class _HomePageState extends State<HomePage> {
                     Container(
                       padding: const EdgeInsets.all(24),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.02),
+                        color: Colors.white.withValues(alpha: 0.02),
                         borderRadius: BorderRadius.circular(24),
                         border: Border.all(
-                          color: Colors.white.withOpacity(0.08),
+                          color: Colors.white.withValues(alpha: 0.08),
                           width: 1,
                         ),
                       ),
@@ -118,7 +162,7 @@ class _HomePageState extends State<HomePage> {
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
                               letterSpacing: 1.2,
-                              color: const Color(0xFFC42261).withOpacity(0.8),
+                              color: const Color(0xFFC42261).withValues(alpha: 0.8),
                             ),
                           ),
                           const SizedBox(height: 16),
@@ -135,13 +179,13 @@ class _HomePageState extends State<HomePage> {
                             decoration: InputDecoration(
                               hintText: '0000',
                               hintStyle: TextStyle(
-                                color: Colors.white.withOpacity(0.2),
+                                color: Colors.white.withValues(alpha: 0.2),
                                 letterSpacing: 8,
                               ),
                               contentPadding: const EdgeInsets.symmetric(
                                   vertical: 16, horizontal: 8),
                               filled: true,
-                              fillColor: Colors.white.withOpacity(0.02),
+                              fillColor: Colors.white.withValues(alpha: 0.02),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(16),
                                 borderSide: BorderSide.none,
@@ -149,7 +193,7 @@ class _HomePageState extends State<HomePage> {
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(16),
                                 borderSide: BorderSide(
-                                  color: Colors.white.withOpacity(0.05),
+                                  color: Colors.white.withValues(alpha: 0.05),
                                 ),
                               ),
                               focusedBorder: OutlineInputBorder(
@@ -173,23 +217,31 @@ class _HomePageState extends State<HomePage> {
                           ),
                           const SizedBox(height: 16),
                           ElevatedButton(
-                            onPressed: _joinRoom,
+                            onPressed: _isLoading ? null : _joinRoom,
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFFC42261),
                               foregroundColor: Colors.black,
                               padding: const EdgeInsets.symmetric(vertical: 16),
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
+                                  borderRadius: BorderRadius.circular(16)),
                               elevation: 0,
                             ),
-                            child: const Text(
-                              'Unirse a la Cola',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
+                            child: _isLoading
+                                ? const SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.black,
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Text(
+                                    'Unirse a la Cola',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
                           ),
                         ],
                       ),
@@ -203,7 +255,7 @@ class _HomePageState extends State<HomePage> {
                       style: OutlinedButton.styleFrom(
                         foregroundColor: Colors.white,
                         side: BorderSide(
-                          color: Colors.white.withOpacity(0.15),
+                          color: Colors.white.withValues(alpha: 0.15),
                         ),
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(

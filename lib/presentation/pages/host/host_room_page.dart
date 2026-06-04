@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import 'package:youtube_player_iframe/youtube_player_iframe.dart';
 import 'package:hybrid_music_room/data/models/room_mode.dart';
 import 'package:hybrid_music_room/data/services/spotify_free_service.dart';
@@ -851,56 +850,6 @@ class _HostRoomPageState extends State<HostRoomPage> {
     ));
   }
 
-  void _showQrDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF0F0F11),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: const Text('Escanear para Unirse',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20)),
-              child: SizedBox(
-                width: 200,
-                height: 200,
-                child: QrImageView(
-                  data: _pin,
-                  version: QrVersions.auto,
-                  size: 200.0,
-                  gapless: false,
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-            Text('CÓDIGO PIN: $_pin',
-                style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w900,
-                  color: Color(0xFF39FF14),
-                  letterSpacing: 2,
-                )),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cerrar',
-                style: TextStyle(
-                    color: Colors.grey, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
-  }
 
   String _formatTime(double seconds, {bool isTotal = false}) {
     final s = isTotal ? _totalDuration.inSeconds : seconds.round();
@@ -1142,14 +1091,6 @@ class _HostRoomPageState extends State<HostRoomPage> {
                       fontWeight: FontWeight.w900,
                       color: Color(0xFFC42261))),
             ],
-          ),
-          IconButton.filledTonal(
-            onPressed: _showQrDialog,
-            icon: const Icon(Icons.qr_code_2_rounded, size: 28),
-            style: IconButton.styleFrom(
-              foregroundColor: const Color(0xFFC42261),
-              backgroundColor: const Color(0xFFC42261).withValues(alpha: 0.1),
-            ),
           ),
         ],
       ),

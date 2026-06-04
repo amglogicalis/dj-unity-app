@@ -53,3 +53,12 @@ android/app/upload-keystore.jks
 
 A-abrir-cmd.bat
 A-abrir-cmd-admin.bat
+
+# Firebase config files
+ios/Runner/GoogleService-Info.plist
+android/app/google-services.json
+lib/firebase_options.dart
+
+# Environment variables
+.env
+.env.*

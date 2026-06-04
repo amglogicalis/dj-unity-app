@@ -20,7 +20,7 @@ class MusicRoomApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Hybrid Music Room',
+      title: 'DJ Unity',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,

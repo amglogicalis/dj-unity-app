@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:youtube_player_iframe/youtube_player_iframe.dart';
 
@@ -14,16 +13,15 @@ void main() {
     );
 
     final Stream<YoutubePlayerValue> playerStream = controller.stream;
-    playerStream.listen((value) {
+    final sub1 = playerStream.listen((value) {
       final PlayerState playerState = value.playerState;
-      final Duration duration = value.metaData.duration;
       if (playerState == PlayerState.ended) {
-        print('Ended');
+        // ended
       }
     });
 
-    final streamSubscription = controller.videoStateStream.listen((state) {
-      final Duration pos = state.position;
+    final sub2 = controller.videoStateStream.listen((state) {
+      // state updated
     });
 
     // Verify playVideo, pauseVideo and loadVideoById compile
@@ -32,5 +30,8 @@ void main() {
     controller.loadVideoById(videoId: 'yKNxeF4KMsY');
 
     expect(controller, isNotNull);
+
+    await sub1.cancel();
+    await sub2.cancel();
   });
 }
