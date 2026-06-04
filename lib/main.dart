@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:just_audio_background/just_audio_background.dart';
 import 'firebase_options.dart';
 import 'presentation/pages/shared/home_page.dart';
 import 'presentation/pages/host/host_room_page.dart';
@@ -11,6 +13,15 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  if (!kIsWeb) {
+    await JustAudioBackground.init(
+      androidNotificationChannelId: 'com.amglogicalis.djunity.channel.audio',
+      androidNotificationChannelName: 'DJ Unity Playback',
+      androidNotificationOngoing: true,
+    );
+  }
+
   runApp(const MusicRoomApp());
 }
 

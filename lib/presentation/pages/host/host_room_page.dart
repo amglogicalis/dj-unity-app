@@ -6,6 +6,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
 import 'package:youtube_player_iframe/youtube_player_iframe.dart';
+import 'package:just_audio/just_audio.dart' hide PlayerState;
+import 'package:just_audio_background/just_audio_background.dart';
+import 'package:youtube_explode_dart/youtube_explode_dart.dart' as yte;
 import 'package:hybrid_music_room/data/models/room_mode.dart';
 import 'package:hybrid_music_room/data/services/spotify_free_service.dart';
 import 'package:hybrid_music_room/data/services/spotify_premium_service.dart';
@@ -52,6 +55,12 @@ class _HostRoomPageState extends State<HostRoomPage> {
   StreamSubscription? _ytStateSubscription;
   StreamSubscription? _ytValueSubscription;
   String? _currentYtVideoId;
+
+  // ── Modo YouTube Nativo (Android) ───────────────────────────
+  AudioPlayer? _audioPlayer;
+  StreamSubscription? _playerStateSubscription;
+  StreamSubscription? _playerPositionSubscription;
+  StreamSubscription? _playerDurationSubscription;
 
   // ── Seek: flag + target para liberar solo cuando el stream confirma ───────
   bool _isSeeking = false;
@@ -422,6 +431,10 @@ class _HostRoomPageState extends State<HostRoomPage> {
     _ytStateSubscription?.cancel();
     _ytValueSubscription?.cancel();
     _ytController?.close();
+    _playerStateSubscription?.cancel();
+    _playerPositionSubscription?.cancel();
+    _playerDurationSubscription?.cancel();
+    _audioPlayer?.dispose();
     _progressNotifier.dispose();
     _djSearchController.dispose();
     _djDebounce?.cancel();
@@ -454,7 +467,11 @@ class _HostRoomPageState extends State<HostRoomPage> {
 
       // Inicializar el servicio según el modo
       if (_mode == RoomMode.youtubeIntegrated) {
-        _initYoutubePlayer();
+        if (kIsWeb) {
+          _initYoutubePlayer();
+        } else {
+          _initYoutubeNativePlayer();
+        }
       } else if (_mode == RoomMode.spotifyPremium) {
         _initSpotifyPremium();
       }
@@ -576,7 +593,57 @@ class _HostRoomPageState extends State<HostRoomPage> {
     });
   }
 
-  Future<void> _ytLoadAndPlay(String title, String artist) async {
+  void _initYoutubeNativePlayer() {
+    _audioPlayer = AudioPlayer();
+
+    // Suscripción al estado de reproducción nativo
+    _playerStateSubscription = _audioPlayer!.playerStateStream.listen((state) {
+      if (!mounted) return;
+      final isPlaying = state.playing;
+      final processingState = state.processingState;
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+
+        if (isPlaying != _isPlaying) {
+          setState(() => _isPlaying = isPlaying);
+        }
+
+        if (processingState == ProcessingState.completed) {
+          _skipSong(autoPlayNext: true);
+        }
+      });
+    });
+
+    // Suscripción a la posición nativa
+    _playerPositionSubscription = _audioPlayer!.positionStream.listen((pos) {
+      if (!mounted) return;
+      if (_isSeeking && _seekTarget != null) {
+        final diff = (pos.inSeconds.toDouble() - _seekTarget!).abs();
+        if (diff < 3.0 || pos.inSeconds.toDouble() > _seekTarget!) {
+          _isSeeking = false;
+          _seekTarget = null;
+          _seekFailsafeTimer?.cancel();
+          _progressNotifier.value = pos.inSeconds.toDouble();
+        }
+        return;
+      }
+      if (_isSeeking) return;
+      _progressNotifier.value = pos.inSeconds.toDouble();
+    });
+
+    // Suscripción a la duración nativa
+    _playerDurationSubscription = _audioPlayer!.durationStream.listen((duration) {
+      if (!mounted) return;
+      if (duration != null && duration != _totalDuration) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) setState(() => _totalDuration = duration);
+        });
+      }
+    });
+  }
+
+  Future<void> _ytLoadAndPlay(String title, String artist, {String? thumbnailUrl}) async {
     setState(() => _ytSearching = true);
     final videoId = await _youtubeService.searchVideo(title, artist);
     if (!mounted) return;
@@ -586,24 +653,69 @@ class _HostRoomPageState extends State<HostRoomPage> {
       return;
     }
 
-    // Esperar a que el player esté listo (máx 5 segundos)
-    int retries = 0;
-    while (!_ytPlayerReady && retries < 25) {
-      await Future.delayed(const Duration(milliseconds: 200));
-      retries++;
+    if (kIsWeb) {
+      // Esperar a que el player esté listo (máx 5 segundos)
+      int retries = 0;
+      while (!_ytPlayerReady && retries < 25) {
+        await Future.delayed(const Duration(milliseconds: 200));
+        retries++;
+      }
+      if (!mounted) return;
+
+      debugPrint('YouTubePlayer: cargando video $videoId (ready=$_ytPlayerReady)');
+      _ytController?.loadVideoById(videoId: videoId);
+
+      // Play explícito tras un breve delay (el autoplay del navegador puede estar bloqueado)
+      await Future.delayed(const Duration(milliseconds: 800));
+      if (mounted) _ytController?.playVideo();
+    } else {
+      try {
+        debugPrint('YouTubePlayer Nativo: obteniendo stream de audio para $videoId');
+        final yteClient = yte.YoutubeExplode();
+        final manifest = await yteClient.videos.streamsClient.getManifest(videoId);
+        final audioStream = manifest.audioOnly.withHighestBitrate();
+        final streamUrl = audioStream.url.toString();
+        yteClient.close();
+
+        if (!mounted) return;
+
+        await _audioPlayer?.setAudioSource(
+          AudioSource.uri(
+            Uri.parse(streamUrl),
+            tag: MediaItem(
+              id: videoId,
+              album: 'Sala DJ Unity: $_pin',
+              title: title,
+              artist: artist,
+              artUri: (thumbnailUrl != null && thumbnailUrl.isNotEmpty)
+                  ? Uri.parse(thumbnailUrl)
+                  : Uri.parse('https://img.youtube.com/vi/$videoId/0.jpg'),
+            ),
+          ),
+        );
+        _audioPlayer?.play();
+      } catch (e) {
+        debugPrint('YouTubePlayer Nativo Error: $e');
+        _showError('Error al reproducir audio de YouTube: $e');
+      }
     }
-    if (!mounted) return;
-
-    debugPrint('YouTubePlayer: cargando video $videoId (ready=$_ytPlayerReady)');
-    _ytController?.loadVideoById(videoId: videoId);
-
-    // Play explícito tras un breve delay (el autoplay del navegador puede estar bloqueado)
-    await Future.delayed(const Duration(milliseconds: 800));
-    if (mounted) _ytController?.playVideo();
   }
 
-  void _ytPlay() => _ytController?.playVideo();
-  void _ytPause() => _ytController?.pauseVideo();
+  void _ytPlay() {
+    if (kIsWeb) {
+      _ytController?.playVideo();
+    } else {
+      _audioPlayer?.play();
+    }
+  }
+
+  void _ytPause() {
+    if (kIsWeb) {
+      _ytController?.pauseVideo();
+    } else {
+      _audioPlayer?.pause();
+    }
+  }
 
   // ─────────────────────────────────────────────────────────────
   // MODO 2: Spotify Premium
@@ -744,7 +856,7 @@ class _HostRoomPageState extends State<HostRoomPage> {
   // ─────────────────────────────────────────────────────────────
 
   /// Llamado cuando cambia la canción en cola. Actúa según el modo activo.
-  Future<void> _onNewSong(String title, String artist) async {
+  Future<void> _onNewSong(String title, String artist, {String? thumbnailUrl}) async {
     // Resetear progreso y duración al cambiar de canción.
     // Esto es seguro aquí porque _onNewSong siempre se llama
     // via Future.microtask() desde el StreamBuilder.
@@ -759,7 +871,7 @@ class _HostRoomPageState extends State<HostRoomPage> {
         await _spotifyPremiumPlay(title, artist);
         break;
       case RoomMode.youtubeIntegrated:
-        await _ytLoadAndPlay(title, artist);
+        await _ytLoadAndPlay(title, artist, thumbnailUrl: thumbnailUrl);
         break;
     }
   }
@@ -974,9 +1086,11 @@ class _HostRoomPageState extends State<HostRoomPage> {
                             currentData['title'] as String? ?? '';
                         final artist =
                             currentData['artist'] as String? ?? '';
+                        final thumbnail =
+                            currentData['thumbnailUrl'] as String? ?? '';
                         if (title.isNotEmpty) {
                           Future.microtask(
-                              () => _onNewSong(title, artist));
+                              () => _onNewSong(title, artist, thumbnailUrl: thumbnail));
                         }
                       } else {
                         // Cola vacía: diferir el setState para no crashear
@@ -984,7 +1098,11 @@ class _HostRoomPageState extends State<HostRoomPage> {
                         WidgetsBinding.instance.addPostFrameCallback((_) {
                           if (!mounted) return;
                           if (_mode == RoomMode.youtubeIntegrated) {
-                            _ytController?.pauseVideo();
+                            if (kIsWeb) {
+                              _ytController?.pauseVideo();
+                            } else {
+                              _audioPlayer?.pause();
+                            }
                             setState(() {
                               _currentYtVideoId = null;
                               _isPlaying = false;
@@ -1188,14 +1306,30 @@ class _HostRoomPageState extends State<HostRoomPage> {
           children: [
             // YouTube: IgnorePointer evita que el iframe capture clics
             // que deben ir al Slider (que está fuera, debajo del card)
-            if (_mode == RoomMode.youtubeIntegrated && _ytController != null)
+            if (_mode == RoomMode.youtubeIntegrated)
               Positioned.fill(
-                child: IgnorePointer(
-                  child: YoutubePlayer(
-                    controller: _ytController!,
-                    aspectRatio: 16 / 9,
-                  ),
-                ),
+                child: kIsWeb
+                    ? (_ytController != null
+                        ? IgnorePointer(
+                            child: YoutubePlayer(
+                              controller: _ytController!,
+                              aspectRatio: 16 / 9,
+                            ),
+                          )
+                        : const SizedBox.shrink())
+                    : (thumbnail.isNotEmpty
+                        ? Image.network(
+                            thumbnail,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const Center(
+                              child: Icon(Icons.music_note_rounded,
+                                  color: Colors.white12, size: 64),
+                            ),
+                          )
+                        : const Center(
+                            child: Icon(Icons.music_note_rounded,
+                                color: Colors.white12, size: 64),
+                          )),
               ),
 
             // Thumbnail para modos Spotify
@@ -1367,19 +1501,23 @@ class _HostRoomPageState extends State<HostRoomPage> {
 
                         switch (_mode) {
                           case RoomMode.youtubeIntegrated:
-                            // loadVideoById con startSeconds es MÁS FIABLE que seekTo:
-                            // seekTo usa eval() que YouTube ignora si está buffering.
-                            // loadVideoById usa el canal run() con JSON y siempre funciona.
-                            if (_currentYtVideoId != null &&
-                                _currentYtVideoId!.isNotEmpty) {
-                              _ytController?.loadVideoById(
-                                videoId: _currentYtVideoId!,
-                                startSeconds: clampedVal,
-                              );
+                            if (kIsWeb) {
+                              // loadVideoById con startSeconds es MÁS FIABLE que seekTo:
+                              // seekTo usa eval() que YouTube ignora si está buffering.
+                              // loadVideoById usa el canal run() con JSON y siempre funciona.
+                              if (_currentYtVideoId != null &&
+                                  _currentYtVideoId!.isNotEmpty) {
+                                _ytController?.loadVideoById(
+                                  videoId: _currentYtVideoId!,
+                                  startSeconds: clampedVal,
+                                );
+                              } else {
+                                // Fallback: intentar seekTo igualmente
+                                _ytController?.seekTo(
+                                    seconds: clampedVal, allowSeekAhead: true);
+                              }
                             } else {
-                              // Fallback: intentar seekTo igualmente
-                              _ytController?.seekTo(
-                                  seconds: clampedVal, allowSeekAhead: true);
+                              _audioPlayer?.seek(Duration(seconds: clampedVal.toInt()));
                             }
                           case RoomMode.spotifyPremium:
                             _spotifyPremium
