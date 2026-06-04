@@ -14,13 +14,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Dart SDK
-        uses: dart-lang/setup-dart@v1
+      - name: Setup Flutter SDK
+        uses: subosito/flutter-action@v2
         with:
-          sdk: 'stable'
+          channel: 'stable'
 
       - name: Install dependencies
-        run: dart pub get
+        run: flutter pub get
 
       - name: Run YouTube extraction test
-        run: dart bin/test_youtube.dart
+        run: flutter pub run bin/test_youtube.dart
