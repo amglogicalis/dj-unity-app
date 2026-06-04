@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
@@ -8,11 +9,13 @@ import 'package:flutter/foundation.dart';
 import 'package:youtube_player_iframe/youtube_player_iframe.dart';
 import 'package:just_audio/just_audio.dart' hide PlayerState;
 import 'package:just_audio_background/just_audio_background.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart' as yte;
 import 'package:hybrid_music_room/data/models/room_mode.dart';
 import 'package:hybrid_music_room/data/services/spotify_free_service.dart';
 import 'package:hybrid_music_room/data/services/spotify_premium_service.dart';
 import 'package:hybrid_music_room/data/services/youtube_service.dart';
+import 'package:hybrid_music_room/presentation/pages/host/iframe_helper.dart';
 
 /// Pantalla principal del Host (DJ).
 /// Soporta 3 modos: Spotify Free, Spotify Premium y YouTube Integrado.
@@ -32,6 +35,7 @@ class _HostRoomPageState extends State<HostRoomPage> {
   bool _isPlaying = false;
   String? _currentPlayingDocId;
   Timer? _playbackTimer;
+  bool _isBottomSheetOpen = false;
 
   // ── Animación ecualizador ─────────────────────────────────────
   final Random _random = Random();
@@ -87,229 +91,268 @@ class _HostRoomPageState extends State<HostRoomPage> {
 
   /// Abre el bottom sheet para que el DJ busque y añada canciones a la cola.
   void _showAddSongBottomSheet() {
+    debugPrint('DJ: _showAddSongBottomSheet() llamado');
     _djSearchController.clear();
     _djSearchResults = [];
     _djIsSearching = false;
 
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (sheetCtx) {
-        return StatefulBuilder(
-          builder: (ctx, setSheetState) {
-            // Búsqueda con debounce de 600ms
-            void onQueryChanged(String q) {
-              _djDebounce?.cancel();
-              _djDebounce = Timer(const Duration(milliseconds: 600), () async {
-                final query = q.trim();
-                if (query.isEmpty) {
-                  setSheetState(() {
-                    _djSearchResults = [];
-                    _djIsSearching = false;
-                  });
-                  return;
-                }
-                setSheetState(() => _djIsSearching = true);
+    setState(() => _isBottomSheetOpen = true);
+    setWebIframePointerEvents(true);
 
-                try {
-                  final List<Map<String, String>> results = await _djSearchMusicBrainz(query);
-                  if (ctx.mounted) {
+    try {
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (sheetCtx) {
+          return StatefulBuilder(
+            builder: (ctx, setSheetState) {
+              // Búsqueda con debounce de 600ms
+              void onQueryChanged(String q) {
+                _djDebounce?.cancel();
+                _djDebounce = Timer(const Duration(milliseconds: 600), () async {
+                  final query = q.trim();
+                  if (query.isEmpty) {
                     setSheetState(() {
-                      _djSearchResults = results;
+                      _djSearchResults = [];
                       _djIsSearching = false;
                     });
+                    return;
                   }
-                } catch (e) {
-                  debugPrint('DJ search error: $e');
-                  if (ctx.mounted) setSheetState(() => _djIsSearching = false);
-                }
-              });
-            }
+                  setSheetState(() => _djIsSearching = true);
 
-            return Container(
-              height: MediaQuery.of(ctx).size.height * 0.85,
-              decoration: const BoxDecoration(
-                color: Color(0xFF0F0F11),
-                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-              ),
-              child: Column(
-                children: [
-                  // Handle
-                  Container(
-                    margin: const EdgeInsets.only(top: 12, bottom: 8),
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(2),
+                  try {
+                    final List<Map<String, String>> results = await _djSearchMusicBrainz(query);
+                    if (ctx.mounted) {
+                      setSheetState(() {
+                        _djSearchResults = results;
+                        _djIsSearching = false;
+                      });
+                      if (results.isEmpty && ctx.mounted) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                          content: const Text('Sin resultados. Prueba con otro término.'),
+                          behavior: SnackBarBehavior.floating,
+                          margin: const EdgeInsets.all(20),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ));
+                      }
+                    }
+                  } catch (e) {
+                    debugPrint('DJ search error: $e');
+                    if (ctx.mounted) {
+                      setSheetState(() => _djIsSearching = false);
+                      ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                        content: const Text('Error de búsqueda. Comprueba tu conexión e inténtalo de nuevo.'),
+                        backgroundColor: Colors.redAccent,
+                        behavior: SnackBarBehavior.floating,
+                        margin: const EdgeInsets.all(20),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ));
+                    }
+                  }
+                });
+              }
+
+              return Container(
+                height: MediaQuery.of(ctx).size.height * 0.85,
+                decoration: const BoxDecoration(
+                  color: Color(0xFF0F0F11),
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+                ),
+                child: Column(
+                  children: [
+                    // Handle
+                    Container(
+                      margin: const EdgeInsets.only(top: 12, bottom: 8),
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
-                  ),
-                  // Título
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
-                    child: Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: _modeAccentColor.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(10),
+                    // Título
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: _modeAccentColor.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(Icons.add_rounded,
+                                color: _modeAccentColor, size: 20),
                           ),
-                          child: Icon(Icons.add_rounded,
-                              color: _modeAccentColor, size: 20),
-                        ),
-                        const SizedBox(width: 12),
-                        const Text(
-                          'Añadir canción',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
+                          const SizedBox(width: 12),
+                          const Text(
+                            'Añadir canción',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                  // Campo de búsqueda
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: TextField(
-                      controller: _djSearchController,
-                      autofocus: true,
-                      onChanged: onQueryChanged,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: InputDecoration(
-                        hintText: 'Buscar canción o artista...',
-                        hintStyle: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.3)),
-                        prefixIcon: Icon(Icons.search_rounded,
-                            color: Colors.white.withValues(alpha: 0.5)),
-                        suffixIcon: _djIsSearching
-                            ? Padding(
-                                padding: const EdgeInsets.all(14),
-                                child: SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                    color: _modeAccentColor,
-                                    strokeWidth: 2,
+                    // Campo de búsqueda
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: TextField(
+                        controller: _djSearchController,
+                        autofocus: true,
+                        onChanged: onQueryChanged,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          hintText: 'Buscar canción o artista...',
+                          hintStyle: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.3)),
+                          prefixIcon: Icon(Icons.search_rounded,
+                              color: Colors.white.withValues(alpha: 0.5)),
+                          suffixIcon: _djIsSearching
+                              ? Padding(
+                                  padding: const EdgeInsets.all(14),
+                                  child: SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      color: _modeAccentColor,
+                                      strokeWidth: 2,
+                                    ),
                                   ),
-                                ),
-                              )
-                            : null,
-                        filled: true,
-                        fillColor: Colors.white.withValues(alpha: 0.04),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide: BorderSide.none,
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide: BorderSide(
-                              color: Colors.white.withValues(alpha: 0.06)),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide:
-                              BorderSide(color: _modeAccentColor, width: 1.5),
+                                )
+                              : null,
+                          filled: true,
+                          fillColor: Colors.white.withValues(alpha: 0.04),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide.none,
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide(
+                                color: Colors.white.withValues(alpha: 0.06)),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide:
+                                BorderSide(color: _modeAccentColor, width: 1.5),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  // Resultados
-                  Expanded(
-                    child: _djSearchResults.isEmpty && !_djIsSearching
-                        ? Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.queue_music_rounded,
-                                    size: 52,
-                                    color:
-                                        Colors.white.withValues(alpha: 0.1)),
-                                const SizedBox(height: 12),
-                                Text(
-                                  'Escribe para buscar',
-                                  style: TextStyle(
+                    const SizedBox(height: 12),
+                    // Resultados
+                    Expanded(
+                      child: _djSearchResults.isEmpty && !_djIsSearching
+                          ? Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.queue_music_rounded,
+                                      size: 52,
                                       color:
-                                          Colors.white.withValues(alpha: 0.4),
-                                      fontSize: 15),
-                                ),
-                              ],
-                            ),
-                          )
-                        : ListView.builder(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 4),
-                            itemCount: _djSearchResults.length,
-                            itemBuilder: (_, i) {
-                              final song = _djSearchResults[i];
-                              final thumb = song['thumbnailUrl'] ?? '';
-                              return Container(
-                                margin: const EdgeInsets.only(bottom: 8),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.02),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                      color:
-                                          Colors.white.withValues(alpha: 0.05)),
-                                ),
-                                child: ListTile(
-                                  leading: ClipRRect(
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: thumb.isNotEmpty
-                                        ? Image.network(
-                                            thumb,
-                                            width: 55,
-                                            height: 40,
-                                            fit: BoxFit.cover,
-                                            errorBuilder:
-                                                (_, __, ___) =>
-                                                    _thumbPlaceholder(),
-                                          )
-                                        : _thumbPlaceholder(),
-                                  ),
-                                  title: Text(
-                                    song['title'] ?? '',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold),
-                                  ),
-                                  subtitle: Text(
-                                    song['artist'] ?? '',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
+                                          Colors.white.withValues(alpha: 0.1)),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    'Escribe para buscar',
                                     style: TextStyle(
                                         color:
-                                            Colors.white.withValues(alpha: 0.6)),
+                                            Colors.white.withValues(alpha: 0.4),
+                                        fontSize: 15),
                                   ),
-                                  trailing: IconButton(
-                                    icon: Icon(Icons.add_circle_rounded,
-                                        color: _modeAccentColor, size: 28),
-                                    onPressed: () async {
+                                ],
+                              ),
+                            )
+                          : ListView.builder(
+                              padding: const EdgeInsets.fromLTRB(16, 4.0, 16, 4.0),
+                              itemCount: _djSearchResults.length,
+                              itemBuilder: (_, i) {
+                                final song = _djSearchResults[i];
+                                final thumb = song['thumbnailUrl'] ?? '';
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.02),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                        color:
+                                            Colors.white.withValues(alpha: 0.05)),
+                                  ),
+                                  child: ListTile(
+                                    onTap: () async {
                                       Navigator.pop(ctx);
                                       await _djAddSongToQueue(song);
                                     },
+                                    leading: ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: thumb.isNotEmpty
+                                          ? Image.network(
+                                              thumb,
+                                              width: 55,
+                                              height: 40,
+                                              fit: BoxFit.cover,
+                                              errorBuilder:
+                                                  (_, __, ___) =>
+                                                      _thumbPlaceholder(),
+                                            )
+                                          : _thumbPlaceholder(),
+                                    ),
+                                    title: Text(
+                                      song['title'] ?? '',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold),
+                                    ),
+                                    subtitle: Text(
+                                      song['artist'] ?? '',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                          color:
+                                              Colors.white.withValues(alpha: 0.6)),
+                                    ),
+                                    trailing: IconButton(
+                                      icon: Icon(Icons.add_circle_rounded,
+                                          color: _modeAccentColor, size: 28),
+                                      onPressed: () async {
+                                        Navigator.pop(ctx);
+                                        await _djAddSongToQueue(song);
+                                      },
+                                    ),
                                   ),
-                                ),
-                              );
-                            },
-                          ),
-                  ),
-                  // Padding para el teclado
-                  SizedBox(
-                      height: MediaQuery.of(ctx).viewInsets.bottom + 16),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
+                                );
+                              },
+                            ),
+                    ),
+                    // Padding para el teclado
+                    SizedBox(
+                        height: MediaQuery.of(ctx).viewInsets.bottom + 16),
+                  ],
+                ),
+              );
+            },
+          );
+        },
+      ).whenComplete(() {
+        if (mounted) {
+          setState(() => _isBottomSheetOpen = false);
+        }
+        setWebIframePointerEvents(false);
+      });
+      debugPrint('DJ: showModalBottomSheet() se abrió correctamente');
+    } catch (e, stack) {
+      debugPrint('DJ: Error abriendo bottom sheet: $e\n$stack');
+      _showError('Error al abrir buscador: $e');
+      if (mounted) {
+        setState(() => _isBottomSheetOpen = false);
+      }
+      setWebIframePointerEvents(false);
+    }
   }
 
   /// Busca canciones usando MusicBrainz (catálogo completo).
@@ -321,10 +364,31 @@ class _HostRoomPageState extends State<HostRoomPage> {
 
     http.Response response;
     if (kIsWeb) {
-      final proxiedUrl = Uri.parse(
+      // Intentamos varios proxies CORS en orden, el primero que funcione gana.
+      // codetabs puede estar limitado por rate; allorigins y corsproxy son fallback.
+      final proxyCandidates = [
         'https://api.codetabs.com/v1/proxy?quest=${Uri.encodeComponent(mbUrl)}',
-      );
-      response = await http.get(proxiedUrl).timeout(const Duration(seconds: 12));
+        'https://api.allorigins.win/raw?url=${Uri.encodeComponent(mbUrl)}',
+        'https://corsproxy.io/?url=${Uri.encodeComponent(mbUrl)}',
+      ];
+      http.Response? proxyResponse;
+      for (final proxyUrl in proxyCandidates) {
+        try {
+          final r = await http
+              .get(Uri.parse(proxyUrl))
+              .timeout(const Duration(seconds: 10));
+          if (r.statusCode == 200) {
+            proxyResponse = r;
+            break;
+          }
+        } catch (e) {
+          debugPrint('DJ proxy error ($proxyUrl): $e');
+        }
+      }
+      if (proxyResponse == null) {
+        throw Exception('Todos los proxies CORS fallaron para MusicBrainz');
+      }
+      response = proxyResponse;
     } else {
       response = await http.get(
         Uri.parse(mbUrl),
@@ -425,6 +489,15 @@ class _HostRoomPageState extends State<HostRoomPage> {
 
   @override
   void dispose() {
+    if (_pin.isNotEmpty) {
+      FirebaseFirestore.instance
+          .collection('rooms')
+          .doc(_pin)
+          .delete()
+          .catchError((e) {
+        debugPrint('Error deleting room on dispose: $e');
+      });
+    }
     _playbackTimer?.cancel();
     _spotifyPollingTimer?.cancel();
     _seekFailsafeTimer?.cancel();
@@ -596,6 +669,13 @@ class _HostRoomPageState extends State<HostRoomPage> {
   void _initYoutubeNativePlayer() {
     _audioPlayer = AudioPlayer();
 
+    // Configurar la sesión de audio para segundo plano y foco de música
+    AudioSession.instance.then((session) async {
+      await session.configure(const AudioSessionConfiguration.music());
+    }).catchError((err) {
+      debugPrint('Error al configurar AudioSession: $err');
+    });
+
     // Suscripción al estado de reproducción nativo
     _playerStateSubscription = _audioPlayer!.playerStateStream.listen((state) {
       if (!mounted) return;
@@ -647,11 +727,13 @@ class _HostRoomPageState extends State<HostRoomPage> {
     setState(() => _ytSearching = true);
     final videoId = await _youtubeService.searchVideo(title, artist);
     if (!mounted) return;
-    setState(() { _currentYtVideoId = videoId; _ytSearching = false; });
+    
     if (videoId == null || videoId.isEmpty) {
+      setState(() => _ytSearching = false);
       _showError('No se encontró "$title" en YouTube');
       return;
     }
+    setState(() { _currentYtVideoId = videoId; });
 
     if (kIsWeb) {
       // Esperar a que el player esté listo (máx 5 segundos)
@@ -667,36 +749,192 @@ class _HostRoomPageState extends State<HostRoomPage> {
 
       // Play explícito tras un breve delay (el autoplay del navegador puede estar bloqueado)
       await Future.delayed(const Duration(milliseconds: 800));
-      if (mounted) _ytController?.playVideo();
+      if (mounted) {
+        _ytController?.playVideo();
+        setState(() => _ytSearching = false);
+      }
     } else {
+      // ── Android APK: reproducción nativa con fallback multi-calidad ──
+      await _audioPlayer?.stop();
+
+      // 1. DIAGNÓSTICO EN EL MÓVIL (Para inspección en consola)
       try {
-        debugPrint('YouTubePlayer Nativo: obteniendo stream de audio para $videoId');
+        debugPrint('--- INICIANDO DIAGNÓSTICO DE RED EN EL MÓVIL ---');
+        final testYt = yte.YoutubeExplode();
+        final testClients = {
+          'androidVr': yte.YoutubeApiClient.androidVr,
+          'android': yte.YoutubeApiClient.android,
+          'androidSdkless': yte.YoutubeApiClient.androidSdkless,
+          'ios': yte.YoutubeApiClient.ios,
+          'mweb': yte.YoutubeApiClient.mweb,
+        };
+        final testUas = {
+          'none': null,
+          'youtube_android': 'com.google.android.youtube/19.12.35 (Linux; U; Android 11; Build/RP1A.200720.011) Version/19.12.35',
+          'youtube_ios': 'com.google.ios.youtube/19.17.2 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X; en_US)',
+          'chrome_mobile': 'Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.50 Mobile Safari/537.36',
+        };
+        for (final cEntry in testClients.entries) {
+          try {
+            final m = await testYt.videos.streamsClient.getManifest(
+              videoId,
+              ytClients: [cEntry.value],
+            ).timeout(const Duration(seconds: 5));
+            final streams = m.audioOnly.toList();
+            if (streams.isEmpty) {
+              debugPrint('  [Diag] Cliente ${cEntry.key}: Sin streams de audio.');
+              continue;
+            }
+            final url = streams.first.url.toString();
+            debugPrint('  [Diag] Cliente ${cEntry.key}: manifest OK. Probando URL...');
+            for (final uaEntry in testUas.entries) {
+              try {
+                final client = HttpClient();
+                final request = await client.getUrl(Uri.parse(url)).timeout(const Duration(seconds: 4));
+                request.headers.add('Range', 'bytes=0-10');
+                if (uaEntry.value != null) {
+                  request.headers.add('User-Agent', uaEntry.value!);
+                }
+                final response = await request.close().timeout(const Duration(seconds: 4));
+                debugPrint('    - UA [${uaEntry.key}] -> HTTP ${response.statusCode}');
+                await response.drain();
+              } catch (reqErr) {
+                debugPrint('    - UA [${uaEntry.key}] -> Error: $reqErr');
+              }
+            }
+          } catch (cErr) {
+            debugPrint('  [Diag] Cliente ${cEntry.key}: Falló manifest ($cErr)');
+          }
+        }
+        testYt.close();
+        debugPrint('--- FIN DEL DIAGNÓSTICO DE RED ---');
+      } catch (diagErr) {
+        debugPrint('Error en el código de diagnóstico: $diagErr');
+      }
+
+      String? workingUrl;
+      String? errorMsg;
+
+      try {
+        debugPrint('YouTubePlayer Nativo: obteniendo manifest para $videoId');
         final yteClient = yte.YoutubeExplode();
-        final manifest = await yteClient.videos.streamsClient.getManifest(videoId);
-        final audioStream = manifest.audioOnly.withHighestBitrate();
-        final streamUrl = audioStream.url.toString();
-        yteClient.close();
+        
+        final clientsToTry = [
+          {
+            'client': yte.YoutubeApiClient.androidVr,
+            'ua': 'com.google.android.youtube.vr/1.31.02 (Linux; U; Android 11; Build/RP1A.200720.011) Version/1.31.02',
+            'name': 'Android VR',
+          },
+          {
+            'client': yte.YoutubeApiClient.android,
+            'ua': 'com.google.android.youtube/19.12.35 (Linux; U; Android 11; Build/RP1A.200720.011) Version/19.12.35',
+            'name': 'Android App',
+          },
+          {
+            'client': yte.YoutubeApiClient.androidSdkless,
+            'ua': 'com.google.android.youtube/19.12.35 (Linux; U; Android 11; Build/RP1A.200720.011) Version/19.12.35',
+            'name': 'Android Sdkless',
+          },
+          {
+            'client': yte.YoutubeApiClient.ios,
+            'ua': 'com.google.ios.youtube/19.17.2 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X; en_US)',
+            'name': 'iOS',
+          },
+          {
+            'client': yte.YoutubeApiClient.mweb,
+            'ua': 'Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.50 Mobile Safari/537.36',
+            'name': 'Mobile Web',
+          },
+        ];
 
-        if (!mounted) return;
+        try {
+          for (final candidateClient in clientsToTry) {
+            final client = candidateClient['client'] as yte.YoutubeApiClient;
+            final ua = candidateClient['ua'] as String;
+            final name = candidateClient['name'] as String;
 
-        await _audioPlayer?.setAudioSource(
-          AudioSource.uri(
-            Uri.parse(streamUrl),
-            tag: MediaItem(
-              id: videoId,
-              album: 'Sala DJ Unity: $_pin',
-              title: title,
-              artist: artist,
-              artUri: (thumbnailUrl != null && thumbnailUrl.isNotEmpty)
-                  ? Uri.parse(thumbnailUrl)
-                  : Uri.parse('https://img.youtube.com/vi/$videoId/0.jpg'),
-            ),
-          ),
-        );
-        _audioPlayer?.play();
+            debugPrint('Intentando obtener manifest con cliente $name...');
+            try {
+              final manifest = await yteClient.videos.streamsClient.getManifest(
+                videoId,
+                ytClients: [client],
+              ).timeout(const Duration(seconds: 7));
+
+              final audioStreams = manifest.audioOnly.toList()
+                ..sort((a, b) => b.bitrate.compareTo(a.bitrate));
+              debugPrint('  Cliente $name: ${audioStreams.length} streams disponibles');
+
+              if (audioStreams.isEmpty) {
+                debugPrint('  Cliente $name no devolvió streams de audio.');
+                continue;
+              }
+
+              // Intentamos cargar los streams correspondientes con su User-Agent sincronizado
+              for (final stream in audioStreams) {
+                final candidate = stream.url.toString();
+                debugPrint('  Probando stream directo de $name: ${stream.audioCodec} ${stream.bitrate}');
+
+                try {
+                  await _audioPlayer!.setAudioSource(
+                    AudioSource.uri(
+                      Uri.parse(candidate),
+                      headers: {
+                        'User-Agent': ua,
+                      },
+                      tag: MediaItem(
+                        id: videoId,
+                        album: 'Sala DJ Unity: $_pin',
+                        title: title,
+                        artist: artist,
+                        artUri: (thumbnailUrl != null && thumbnailUrl.isNotEmpty)
+                            ? Uri.parse(thumbnailUrl)
+                            : Uri.parse('https://img.youtube.com/vi/$videoId/0.jpg'),
+                      ),
+                    ),
+                  ).timeout(const Duration(seconds: 8));
+
+                  workingUrl = candidate;
+                  debugPrint('  ✓ Stream directo cargado: ${stream.audioCodec} ${stream.bitrate} usando cliente $name');
+                  break; // Primer stream exitoso = ganador
+                } catch (streamErr) {
+                  debugPrint('  ✗ Stream de $name fallido o timeout: $streamErr');
+                }
+              }
+
+              if (workingUrl != null) {
+                break; // Ya tenemos un stream funcionando, no necesitamos probar más clientes
+              }
+            } catch (manifestErr) {
+              debugPrint('  ✗ Error al obtener manifest con cliente $name: $manifestErr');
+            }
+          }
+        } finally {
+          yteClient.close();
+        }
       } catch (e) {
-        debugPrint('YouTubePlayer Nativo Error: $e');
-        _showError('Error al reproducir audio de YouTube: $e');
+        debugPrint('YouTubePlayer Nativo error general en extracción: $e');
+      }
+
+      if (workingUrl == null) {
+        errorMsg = 'No se encontró un stream de audio compatible para "$title". '
+            'YouTube puede estar bloqueando la descarga. Inténtalo de nuevo.';
+      }
+
+      if (!mounted) return;
+      setState(() => _ytSearching = false);
+
+      if (errorMsg != null) {
+        _showError(errorMsg);
+        return;
+      }
+
+      // Iniciar reproducción
+      try {
+        await _audioPlayer?.play();
+        debugPrint('YouTubePlayer Nativo: reproducción iniciada ✓');
+      } catch (playErr) {
+        debugPrint('YouTubePlayer Nativo: error al llamar play(): $playErr');
+        if (mounted) _showError('No se pudo iniciar la reproducción: $playErr');
       }
     }
   }
@@ -1309,14 +1547,37 @@ class _HostRoomPageState extends State<HostRoomPage> {
             if (_mode == RoomMode.youtubeIntegrated)
               Positioned.fill(
                 child: kIsWeb
-                    ? (_ytController != null
-                        ? IgnorePointer(
-                            child: YoutubePlayer(
-                              controller: _ytController!,
-                              aspectRatio: 16 / 9,
+                    ? Stack(
+                        children: [
+                          Offstage(
+                            offstage: _isBottomSheetOpen,
+                            child: _ytController != null
+                                ? IgnorePointer(
+                                    child: YoutubePlayer(
+                                      controller: _ytController!,
+                                      aspectRatio: 16 / 9,
+                                    ),
+                                  )
+                                : const SizedBox.shrink(),
+                          ),
+                          if (_isBottomSheetOpen || _ytController == null)
+                            Positioned.fill(
+                              child: thumbnail.isNotEmpty
+                                  ? Image.network(
+                                      thumbnail,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_, __, ___) => const Center(
+                                        child: Icon(Icons.music_note_rounded,
+                                            color: Colors.white12, size: 64),
+                                      ),
+                                    )
+                                  : const Center(
+                                      child: Icon(Icons.music_note_rounded,
+                                          color: Colors.white12, size: 64),
+                                    ),
                             ),
-                          )
-                        : const SizedBox.shrink())
+                        ],
+                      )
                     : (thumbnail.isNotEmpty
                         ? Image.network(
                             thumbnail,
@@ -1355,6 +1616,36 @@ class _HostRoomPageState extends State<HostRoomPage> {
                 ),
               ),
             ),
+
+            // Overlay de carga (solo Android, mientras se obtiene el stream)
+            if (!kIsWeb && _ytSearching && _mode == RoomMode.youtubeIntegrated)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black.withValues(alpha: 0.65),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 36,
+                        height: 36,
+                        child: CircularProgressIndicator(
+                          color: _modeAccentColor,
+                          strokeWidth: 3,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Obteniendo audio de YouTube...',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.9),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
 
             // Ecualizador animado
             if (hasSongs && _isPlaying)

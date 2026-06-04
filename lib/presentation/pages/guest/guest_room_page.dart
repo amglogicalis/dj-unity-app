@@ -43,17 +43,51 @@ class _GuestRoomPageState extends State<GuestRoomPage> {
   // ── Firestore: cola de la sala ─────────────────────────────────
   Stream<QuerySnapshot>? _playlistStream;
   String? _roomPin;
+  StreamSubscription<DocumentSnapshot>? _roomSubscription;
 
   @override
   void dispose() {
     _searchController.dispose();
     _debounce?.cancel();
+    _roomSubscription?.cancel();
     super.dispose();
   }
 
   // ─────────────────────────────────────────────────────────────
   // BÚSQUEDA (lógica sin cambios)
   // ─────────────────────────────────────────────────────────────
+
+  Future<http.Response> _performGetWithCorsProxy(
+    String targetUrl, {
+    Map<String, String>? headers,
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    if (!kIsWeb) {
+      return http.get(Uri.parse(targetUrl), headers: headers).timeout(timeout);
+    }
+
+    final proxyCandidates = [
+      'https://api.codetabs.com/v1/proxy?quest=${Uri.encodeComponent(targetUrl)}',
+      'https://api.allorigins.win/raw?url=${Uri.encodeComponent(targetUrl)}',
+      'https://corsproxy.io/?url=${Uri.encodeComponent(targetUrl)}',
+    ];
+
+    dynamic lastException;
+    for (final proxyUrl in proxyCandidates) {
+      try {
+        debugPrint('Invitado proxy: intentando GET vía $proxyUrl');
+        final response = await http.get(Uri.parse(proxyUrl)).timeout(timeout);
+        if (response.statusCode == 200) {
+          return response;
+        }
+        debugPrint('Invitado proxy ($proxyUrl) falló con status: ${response.statusCode}');
+      } catch (e) {
+        debugPrint('Invitado proxy error ($proxyUrl): $e');
+        lastException = e;
+      }
+    }
+    throw lastException ?? Exception('Todos los proxies CORS fallaron para $targetUrl');
+  }
 
   void _onSearchChanged(String query) {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
@@ -80,8 +114,7 @@ class _GuestRoomPageState extends State<GuestRoomPage> {
     });
 
     try {
-      // En Flutter Web, defaultTargetPlatform devuelve iOS cuando corre en Safari de iPhone/iPad
-      final isIOS = kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+      final isIOS = defaultTargetPlatform == TargetPlatform.iOS;
 
       if (isIOS) {
         await _searchWithItunes(cleanQuery);
@@ -108,21 +141,14 @@ class _GuestRoomPageState extends State<GuestRoomPage> {
     final mbUrl =
         'https://musicbrainz.org/ws/2/recording?query=$encodedQuery&fmt=json&limit=25';
 
-    http.Response response;
-    if (kIsWeb) {
-      final proxiedUrl = Uri.parse(
-        'https://api.codetabs.com/v1/proxy?quest=${Uri.encodeComponent(mbUrl)}',
-      );
-      response = await http.get(proxiedUrl).timeout(const Duration(seconds: 12));
-    } else {
-      response = await http.get(
-        Uri.parse(mbUrl),
-        headers: {
-          'User-Agent': 'DemocraticDJ/1.0 (https://democratic-dj-fe97d.web.app)',
-          'Accept': 'application/json',
-        },
-      ).timeout(const Duration(seconds: 12));
-    }
+    final response = await _performGetWithCorsProxy(
+      mbUrl,
+      headers: {
+        'User-Agent': 'DemocraticDJ/1.0 (https://democratic-dj-fe97d.web.app)',
+        'Accept': 'application/json',
+      },
+      timeout: const Duration(seconds: 12),
+    );
 
     if (response.statusCode != 200) {
       throw Exception('MusicBrainz devolvió status ${response.statusCode}');
@@ -189,30 +215,19 @@ class _GuestRoomPageState extends State<GuestRoomPage> {
 
   Future<void> _searchWithItunes(String query) async {
     debugPrint('Búsqueda iTunes (iOS): "$query"');
-    if (kIsWeb) {
-      final targetUrl =
-          'https://itunes.apple.com/search?term=${Uri.encodeComponent(query)}&media=music&entity=song&limit=25&country=us';
-      final url = Uri.parse(
-        'https://api.codetabs.com/v1/proxy?quest=${Uri.encodeComponent(targetUrl)}',
-      );
-      final response = await http.get(url).timeout(const Duration(seconds: 10));
-      if (response.statusCode == 200) {
-        _parseItunesResponse(response.body);
-        return;
-      }
-      throw Exception('iTunes vía proxy devolvió status ${response.statusCode}');
-    } else {
-      final response = await http.get(
-        Uri.parse(
-          'https://itunes.apple.com/search?term=${Uri.encodeComponent(query)}&media=music&entity=song&limit=25&country=us',
-        ),
-      ).timeout(const Duration(seconds: 10));
-      if (response.statusCode == 200) {
-        _parseItunesResponse(response.body);
-        return;
-      }
-      throw Exception('iTunes devolvió status ${response.statusCode}');
+    final targetUrl =
+        'https://itunes.apple.com/search?term=${Uri.encodeComponent(query)}&media=music&entity=song&limit=25&country=us';
+    
+    final response = await _performGetWithCorsProxy(
+      targetUrl,
+      timeout: const Duration(seconds: 10),
+    );
+    
+    if (response.statusCode == 200) {
+      _parseItunesResponse(response.body);
+      return;
     }
+    throw Exception('iTunes devolvió status ${response.statusCode}');
   }
 
   void _parseItunesResponse(String responseBody) {
@@ -481,6 +496,10 @@ class _GuestRoomPageState extends State<GuestRoomPage> {
                                                     .withValues(alpha: 0.05)),
                                           ),
                                           child: ListTile(
+                                            onTap: () async {
+                                              Navigator.pop(sheetCtx);
+                                              await _addSongToQueue(song);
+                                            },
                                             leading: ClipRRect(
                                               borderRadius:
                                                   BorderRadius.circular(8),
@@ -597,6 +616,35 @@ class _GuestRoomPageState extends State<GuestRoomPage> {
         .collection('playlist')
         .orderBy('createdAt', descending: false)
         .snapshots();
+
+    _roomSubscription ??= FirebaseFirestore.instance
+        .collection('rooms')
+        .doc(pin)
+        .snapshots()
+        .listen((snapshot) {
+      if (!snapshot.exists) {
+        if (!context.mounted) return;
+        _roomSubscription?.cancel();
+        _roomSubscription = null;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              'La sala ha sido cerrada por el DJ.',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        );
+        Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+      }
+    });
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F0F11),

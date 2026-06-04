@@ -15,11 +15,18 @@ void main() async {
   );
 
   if (!kIsWeb) {
-    await JustAudioBackground.init(
-      androidNotificationChannelId: 'com.amglogicalis.djunity.channel.audio',
-      androidNotificationChannelName: 'DJ Unity Playback',
-      androidNotificationOngoing: true,
-    );
+    try {
+      await JustAudioBackground.init(
+        androidNotificationChannelId: 'com.amglogicalis.djunity.channel.audio',
+        androidNotificationChannelName: 'DJ Unity Playback',
+        androidNotificationOngoing: true,
+      );
+    } catch (e) {
+      // Si el servicio de audio en background falla al iniciar
+      // (puede ocurrir en algunos dispositivos con beta packages),
+      // la app continúa funcionando normalmente en foreground.
+      debugPrint('JustAudioBackground init error (non-fatal): $e');
+    }
   }
 
   runApp(const MusicRoomApp());

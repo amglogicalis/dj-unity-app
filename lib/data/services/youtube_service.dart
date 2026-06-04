@@ -10,8 +10,8 @@ import 'package:http/http.dart' as http;
 ///   - En MÓVIL: scraping directo de YouTube + fallback Piped + Invidious,
 ///     con verificación de embeddability vía oEmbed.
 class YouTubeService {
-  static const _timeout = Duration(seconds: 15);
-  static const _maxCandidates = 5;
+  static const _timeout = Duration(seconds: 8);
+  static const _maxCandidates = 3;
 
   // Instancias públicas de Piped (solo móvil)
   static const _pipedInstances = [

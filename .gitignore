@@ -33,6 +33,8 @@ migrate_working_dir/
 /build/
 /coverage/
 
+flutter_run_android_an.log
+
 # Symbolication related
 app.*.symbols
 
@@ -53,6 +55,8 @@ android/app/upload-keystore.jks
 
 A-abrir-cmd.bat
 A-abrir-cmd-admin.bat
+A-clean-logs.bat
+flutter_run_android_an.log
 
 # Firebase config files
 ios/Runner/GoogleService-Info.plist
