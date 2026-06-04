@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DJ Unity - La cola de reproducción definitiva</title>
+  <!-- SEO Meta Tags -->
+  <meta name="description" content="Únete a la mejor experiencia musical compartida. Controla salas como DJ u opina en tiempo real como invitado. Disponible para Web, Android e iOS.">
+  <link rel="icon" type="image/png" href="https://democratic-dj-fe97d.web.app/favicon.png" onerror="this.href='https://img.icons8.com/neon/96/music.png'">
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800;900&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <style>
+    :root {
+      --bg-color: #08080a;
+      --card-bg: rgba(255, 255, 255, 0.02);
+      --card-border: rgba(255, 255, 255, 0.06);
+      --primary: #c42261;      /* Rosa Neón */
+      --secondary: #39ff14;    /* Verde Neón */
+      --text-main: #ffffff;
+      --text-muted: rgba(255, 255, 255, 0.6);
+      --glow-pink: rgba(196, 34, 97, 0.4);
+      --glow-green: rgba(57, 255, 20, 0.2);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Outfit', sans-serif;
+    }
+
+    body {
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      overflow-x: hidden;
+      line-height: 1.6;
+    }
+
+    /* Ambient Glowing Background Backgrounds */
+    .ambient-glows {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: -1;
+      overflow: hidden;
+      pointer-events: none;
+    }
+
+    .glow-1 {
+      position: absolute;
+      top: -10%;
+      left: -10%;
+      width: 50vw;
+      height: 50vw;
+      border-radius: 50%;
+      background: radial-gradient(circle, var(--glow-pink) 0%, rgba(8, 8, 10, 0) 70%);
+      filter: blur(80px);
+      animation: float-glow-1 25s infinite alternate ease-in-out;
+    }
+
+    .glow-2 {
+      position: absolute;
+      bottom: 10%;
+      right: -10%;
+      width: 45vw;
+      height: 45vw;
+      border-radius: 50%;
+      background: radial-gradient(circle, var(--glow-green) 0%, rgba(8, 8, 10, 0) 70%);
+      filter: blur(80px);
+      animation: float-glow-2 20s infinite alternate ease-in-out;
+    }
+
+    @keyframes float-glow-1 {
+      0% { transform: translate(0, 0) scale(1); }
+      100% { transform: translate(100px, 50px) scale(1.1); }
+    }
+
+    @keyframes float-glow-2 {
+      0% { transform: translate(0, 0) scale(1); }
+      100% { transform: translate(-80px, -60px) scale(1.15); }
+    }
+
+    /* Layout Containers */
+    header {
+      padding: 24px 40px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      max-width: 1200px;
+      margin: 0 auto;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    }
+
+    .logo-container {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-icon {
+      font-size: 32px;
+      color: var(--primary);
+      text-shadow: 0 0 15px var(--primary);
+      animation: spin-vinyl 12s linear infinite;
+    }
+
+    @keyframes spin-vinyl {
+      100% { transform: rotate(365deg); }
+    }
+
+    .logo-text {
+      font-size: 22px;
+      font-weight: 900;
+      letter-spacing: 2px;
+      background: linear-gradient(135deg, #ffffff 60%, var(--primary) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .github-link {
+      color: var(--text-main);
+      font-size: 24px;
+      transition: all 0.3s ease;
+      opacity: 0.8;
+    }
+
+    .github-link:hover {
+      color: var(--primary);
+      transform: scale(1.1);
+      opacity: 1;
+    }
+
+    /* Hero Section */
+    .hero {
+      text-align: center;
+      padding: 80px 20px 40px 20px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 6px 16px;
+      background: rgba(196, 34, 97, 0.1);
+      border: 1px solid rgba(196, 34, 97, 0.3);
+      border-radius: 100px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--primary);
+      letter-spacing: 1px;
+      margin-bottom: 24px;
+      box-shadow: 0 0 15px rgba(196, 34, 97, 0.1);
+    }
+
+    h1 {
+      font-size: 56px;
+      font-weight: 900;
+      line-height: 1.1;
+      margin-bottom: 20px;
+      letter-spacing: -1px;
+    }
+
+    h1 span {
+      background: linear-gradient(135deg, var(--primary) 30%, var(--secondary) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      text-shadow: 0 0 30px rgba(196, 34, 97, 0.2);
+    }
+
+    .hero-subtitle {
+      font-size: 18px;
+      color: var(--text-muted);
+      max-width: 600px;
+      margin: 0 auto 40px auto;
+    }
+
+    /* Grid Options */
+    .options-grid {
+      display: grid;
+      grid-template-cols: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 32px;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 32px;
+      padding: 40px 32px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0) 100%);
+      pointer-events: none;
+    }
+
+    .card:hover {
+      transform: translateY(-8px);
+      border-color: rgba(255, 255, 255, 0.15);
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+    }
+
+    .card-top {
+      margin-bottom: 30px;
+    }
+
+    .card-icon {
+      width: 60px;
+      height: 60px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.03);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      margin-bottom: 24px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      transition: all 0.3s ease;
+    }
+
+    .card:hover .card-icon {
+      transform: scale(1.08);
+    }
+
+    /* Icons and glows specific to each card type */
+    .card-web .card-icon {
+      color: #61dafb;
+      box-shadow: 0 0 20px rgba(97, 218, 251, 0.15);
+    }
+    .card-android .card-icon {
+      color: var(--secondary);
+      box-shadow: 0 0 20px rgba(57, 255, 20, 0.15);
+    }
+    .card-ios .card-icon {
+      color: #ff9f0a;
+      box-shadow: 0 0 20px rgba(255, 159, 10, 0.15);
+    }
+
+    .card h2 {
+      font-size: 24px;
+      font-weight: 800;
+      margin-bottom: 12px;
+      letter-spacing: -0.5px;
+    }
+
+    .card p {
+      font-size: 15px;
+      color: var(--text-muted);
+      margin-bottom: 20px;
+    }
+
+    /* Buttons */
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      width: 100%;
+      padding: 16px;
+      border-radius: 16px;
+      font-size: 15px;
+      font-weight: 700;
+      text-decoration: none;
+      transition: all 0.3s ease;
+      cursor: pointer;
+      border: none;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: #ffffff;
+      box-shadow: 0 4px 15px rgba(196, 34, 97, 0.4);
+    }
+
+    .btn-primary:hover {
+      background: #dc2b71;
+      box-shadow: 0 8px 25px rgba(196, 34, 97, 0.6);
+      transform: translateY(-2px);
+    }
+
+    .btn-secondary {
+      background: var(--secondary);
+      color: #000000;
+      box-shadow: 0 4px 15px rgba(57, 255, 20, 0.3);
+    }
+
+    .btn-secondary:hover {
+      background: #50ff30;
+      box-shadow: 0 8px 25px rgba(57, 255, 20, 0.5);
+      transform: translateY(-2px);
+    }
+
+    .release-info {
+      text-align: center;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      color: var(--secondary);
+      margin-top: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .release-info i {
+      animation: pulse-dot 1.5s infinite alternate;
+    }
+
+    @keyframes pulse-dot {
+      0% { opacity: 0.3; }
+      100% { opacity: 1; }
+    }
+
+    /* Steps List (PWA guide) */
+    .steps-list {
+      list-style: none;
+      text-align: left;
+      margin-top: 10px;
+    }
+
+    .step-item {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      margin-bottom: 14px;
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    .step-num {
+      flex-shrink: 0;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: rgba(255, 159, 10, 0.1);
+      border: 1px solid rgba(255, 159, 10, 0.3);
+      color: #ff9f0a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 12px;
+    }
+
+    .step-text strong {
+      color: var(--text-main);
+    }
+
+    /* Footer */
+    footer {
+      text-align: center;
+      padding: 60px 20px;
+      margin-top: 80px;
+      border-top: 1px solid rgba(255, 255, 255, 0.03);
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+
+    footer a {
+      color: var(--primary);
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    footer a:hover {
+      text-decoration: underline;
+    }
+
+    /* Responsiveness Rules */
+    @media (max-width: 768px) {
+      h1 {
+        font-size: 40px;
+      }
+      header {
+        padding: 20px;
+      }
+      .options-grid {
+        grid-template-cols: 1fr;
+        padding: 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Ambient background glow layers -->
+  <div class="ambient-glows">
+    <div class="glow-1"></div>
+    <div class="glow-2"></div>
+  </div>
+
+  <header>
+    <div class="logo-container">
+      <i class="fa-solid fa-compact-disc logo-icon"></i>
+      <span class="logo-text">DJ UNITY</span>
+    </div>
+    <a href="https://github.com/amglogicalis/dj-unity-app" class="github-link" target="_blank" aria-label="GitHub Repository">
+      <i class="fa-brands fa-github"></i>
+    </a>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="badge">VISTA WEB / APP INSTALABLE</div>
+      <h1>Accede a la mejor música con <span>DJ Unity</span></h1>
+      <p class="hero-subtitle">Crea salas, maneja el volumen y organiza la cola musical definitiva con tus amigos de manera inmediata desde cualquier dispositivo.</p>
+    </section>
+
+    <section class="options-grid">
+      
+      <!-- CARD 1: VERSION WEB -->
+      <div class="card card-web">
+        <div class="card-top">
+          <div class="card-icon">
+            <i class="fa-solid fa-globe"></i>
+          </div>
+          <h2>Versión Web</h2>
+          <p>La alternativa ideal para computadores y navegadores sin instalar nada. Crea tu panel o únete como invitado inmediatamente.</p>
+        </div>
+        <div>
+          <a href="https://democratic-dj-fe97d.web.app" class="btn btn-primary" target="_blank">
+            <i class="fa-solid fa-square-arrow-up-right"></i> Abrir Versión Web
+          </a>
+        </div>
+      </div>
+
+      <!-- CARD 2: VERSION ANDROID (APK AUTO-RELEASE FETCH) -->
+      <div class="card card-android">
+        <div class="card-top">
+          <div class="card-icon">
+            <i class="fa-brands fa-android"></i>
+          </div>
+          <h2>Dispositivos Android</h2>
+          <p>La versión definitiva. El único reproductor con persistencia de audio: continúa sonando al apagar la pantalla o salir de la app.</p>
+        </div>
+        <div>
+          <a id="android-btn" href="https://github.com/amglogicalis/dj-unity-app/releases/latest" class="btn btn-secondary">
+            <i class="fa-solid fa-circle-down"></i> Descargar APK
+          </a>
+          <div id="android-version" class="release-info">
+            <i class="fa-solid fa-circle-dot"></i> Buscando versión en GitHub...
+          </div>
+        </div>
+      </div>
+
+      <!-- CARD 3: VERSION iOS (PWA CONFIG) -->
+      <div class="card card-ios">
+        <div class="card-top">
+          <div class="card-icon">
+            <i class="fa-brands fa-apple"></i>
+          </div>
+          <h2>Instalación en iOS</h2>
+          <p>Disfruta de la aplicación como si fuera nativa en tu iPhone o iPad configurando la Web App en tu escritorio en segundos:</p>
+          
+          <ul class="steps-list">
+            <li class="step-item">
+              <span class="step-num">1</span>
+              <span class="step-text">Entra a la <strong>Versión Web</strong> desde el navegador <strong>Safari</strong>.</span>
+            </li>
+            <li class="step-item">
+              <span class="step-num">2</span>
+              <span class="step-text">Pulsa el botón de <strong>Compartir</strong> <i class="fa-solid fa-arrow-up-from-bracket"></i> en la barra de menú.</span>
+            </li>
+            <li class="step-item">
+              <span class="step-num">3</span>
+              <span class="step-text">Selecciona <strong>Añadir a la pantalla de inicio</strong>.</span>
+            </li>
+          </ul>
+        </div>
+        <div>
+          <button class="btn" style="background: rgba(255,159,10,0.1); color: #ff9f0a; cursor: default;">
+            <i class="fa-solid fa-mobile-screen-button"></i> Ejecutar como PWA
+          </button>
+        </div>
+      </div>
+
+    </section>
+  </main>
+
+  <footer>
+    <p>&copy; 2026 DJ Unity. Desarrollado para <a href="https://github.com/amglogicalis/dj-unity-app" target="_blank">amglogicalis/dj-unity-app</a>.</p>
+  </footer>
+
+  <!-- Dynamic GitHub API script for latest release download links -->
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const repo = "amglogicalis/dj-unity-app";
+      const apiUrl = `https://api.github.com/repos/${repo}/releases/latest`;
+      
+      const androidBtn = document.getElementById("android-btn");
+      const androidVersionText = document.getElementById("android-version");
+
+      fetch(apiUrl)
+        .then(res => {
+          if (!res.ok) throw new Error(`HTTP status ${res.statusCode}`);
+          return res.json();
+        })
+        .then(data => {
+          const versionTag = data.tag_name;
+          const releaseName = data.name || "Última versión";
+          
+          // Find the APK file among the release assets
+          const apkAsset = data.assets.find(asset => asset.name.endsWith('.apk'));
+          
+          if (apkAsset) {
+            androidBtn.href = apkAsset.browser_download_url;
+            androidVersionText.innerHTML = `<i class="fa-solid fa-circle-dot"></i> Disponible: ${releaseName} (${versionTag})`;
+          } else {
+            // Fallback if release doesn't have an APK asset
+            androidBtn.href = data.html_url;
+            androidVersionText.innerHTML = `<i class="fa-solid fa-circle-dot"></i> Ir a versión: ${versionTag}`;
+          }
+        })
+        .catch(err => {
+          console.warn("Error consultando la API de GitHub:", err);
+          // Standard fallback links
+          androidBtn.href = `https://github.com/${repo}/releases/latest`;
+          androidVersionText.innerHTML = `<i class="fa-solid fa-circle-dot"></i> Descargar de GitHub`;
+        });
+    });
+  </script>
+</body>
+</html>
