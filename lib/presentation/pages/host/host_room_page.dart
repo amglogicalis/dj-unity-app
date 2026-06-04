@@ -1030,9 +1030,14 @@ class _HostRoomPageState extends State<HostRoomPage> {
                                         currentData?['artist'] as String? ?? ''),
 
                                   // ── Reproductor visual (solo imagen/video) ────
-                                  AspectRatio(
-                                    aspectRatio: 16 / 9,
-                                    child: _buildPlayerCard(hasSongs, thumbnail),
+                                  ConstrainedBox(
+                                    constraints: BoxConstraints(
+                                      maxHeight: constraints.maxHeight < 700 ? 190 : 330,
+                                    ),
+                                    child: AspectRatio(
+                                      aspectRatio: 16 / 9,
+                                      child: _buildPlayerCard(hasSongs, thumbnail),
+                                    ),
                                   ),
 
                                   // ── Info canción (fuera del Stack/iframe) ─────
