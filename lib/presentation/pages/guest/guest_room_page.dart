@@ -647,7 +647,7 @@ class _GuestRoomPageState extends State<GuestRoomPage> {
     });
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0F11),
+      backgroundColor: const Color(0xFF0C0C0F),
       appBar: AppBar(
         title: Row(
           mainAxisSize: MainAxisSize.min,
@@ -658,7 +658,12 @@ class _GuestRoomPageState extends State<GuestRoomPage> {
               padding:
                   const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
               decoration: BoxDecoration(
-                color: const Color(0xFFC42261).withValues(alpha: 0.12),
+                gradient: LinearGradient(
+                  colors: [
+                    const Color(0xFFC42261).withValues(alpha: 0.18),
+                    const Color(0xFF39FF14).withValues(alpha: 0.08),
+                  ],
+                ),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
                     color: const Color(0xFFC42261).withValues(alpha: 0.4)),
@@ -692,9 +697,9 @@ class _GuestRoomPageState extends State<GuestRoomPage> {
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFF0F0F11), Color(0xFF000000)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF0C0C0F), Color(0xFF060608)],
           ),
         ),
         child: SafeArea(
@@ -756,6 +761,15 @@ class _GuestRoomPageState extends State<GuestRoomPage> {
               ? const Color(0xFFC42261).withValues(alpha: 0.3)
               : Colors.white.withValues(alpha: 0.06),
         ),
+        boxShadow: hasSongs
+            ? [
+                BoxShadow(
+                  color: const Color(0xFF39FF14).withValues(alpha: 0.04),
+                  blurRadius: 20,
+                  spreadRadius: 0,
+                )
+              ]
+            : [],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
