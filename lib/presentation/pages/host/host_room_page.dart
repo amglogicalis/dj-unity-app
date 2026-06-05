@@ -65,6 +65,12 @@ class _HostRoomPageState extends State<HostRoomPage> {
   StreamSubscription? _playerStateSubscription;
   StreamSubscription? _playerPositionSubscription;
   StreamSubscription? _playerDurationSubscription;
+  /// Guard: evita el doble auto-skip cuando just_audio emite
+  /// ProcessingState.completed más de una vez durante la transición
+  /// (comportamiento conocido en just_audio_background en Android).
+  /// Se resetea en _playlistSubscription cuando Firestore confirma
+  /// que el primer documento ha cambiado realmente.
+  bool _isAutoSkipping = false;
 
   // ── Seek: flag + target para liberar solo cuando el stream confirma ───────
   bool _isSeeking = false;
@@ -545,6 +551,9 @@ class _HostRoomPageState extends State<HostRoomPage> {
         final nextDocId = qs.docs.isNotEmpty ? qs.docs.first.id : null;
         if (nextDocId == _currentPlayingDocId) return; // Sin cambio real
         _currentPlayingDocId = nextDocId;
+        // Canción confirmada cambiada por Firestore: liberar el guard
+        // de auto-skip para que la próxima canción pueda hacer skip también.
+        _isAutoSkipping = false;
         _progressNotifier.value = 0.0;
         if (nextDocId != null) {
           final data = qs.docs.first.data() as Map<String, dynamic>;
@@ -728,7 +737,16 @@ class _HostRoomPageState extends State<HostRoomPage> {
         }
 
         if (processingState == ProcessingState.completed) {
-          _skipSong(autoPlayNext: true);
+          // Guard: ignorar si ya hay un auto-skip en curso.
+          // just_audio_background puede emitir 'completed' varias veces
+          // durante la transición de canciones en Android, lo que causaba
+          // un doble delete y saltarse la siguiente canción.
+          if (!_isAutoSkipping) {
+            _isAutoSkipping = true;
+            _skipSong(autoPlayNext: true);
+          } else {
+            debugPrint('_playerStateSubscription: completed ignorado (auto-skip ya en curso)');
+          }
         }
       });
     });
