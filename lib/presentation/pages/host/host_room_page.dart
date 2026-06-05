@@ -551,9 +551,11 @@ class _HostRoomPageState extends State<HostRoomPage> {
         final nextDocId = qs.docs.isNotEmpty ? qs.docs.first.id : null;
         if (nextDocId == _currentPlayingDocId) return; // Sin cambio real
         _currentPlayingDocId = nextDocId;
-        // Canción confirmada cambiada por Firestore: liberar el guard
-        // de auto-skip para que la próxima canción pueda hacer skip también.
-        _isAutoSkipping = false;
+        // NOTA: NO reseteamos _isAutoSkipping aquí.
+        // El guard se libera sólo cuando la nueva canción empiece
+        // a reproducirse (en _ytLoadAndPlay), para bloquear cualquier
+        // evento 'completed' duplicado que just_audio_background emite
+        // en Android al llamar stop() durante la transición.
         _progressNotifier.value = 0.0;
         if (nextDocId != null) {
           final data = qs.docs.first.data() as Map<String, dynamic>;
@@ -562,7 +564,8 @@ class _HostRoomPageState extends State<HostRoomPage> {
           final th = data['thumbnailUrl'] as String? ?? '';
           if (t.isNotEmpty) _onNewSong(t, a, thumbnailUrl: th);
         } else {
-          // Cola vacía: pausar reproducción
+          // Cola vacía: pausar reproducción y liberar el guard
+          _isAutoSkipping = false; // Cola vacía: ya no hay nada que skipear
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!mounted) return;
             if (_mode == RoomMode.youtubeIntegrated) {
@@ -785,6 +788,7 @@ class _HostRoomPageState extends State<HostRoomPage> {
     if (!mounted) return;
     
     if (videoId == null || videoId.isEmpty) {
+      _isAutoSkipping = false; // Liberar guard: vídeo no encontrado en YouTube
       setState(() => _ytSearching = false);
       _showError('No se encontró "$title" en YouTube');
       return;
@@ -925,6 +929,7 @@ class _HostRoomPageState extends State<HostRoomPage> {
       setState(() => _ytSearching = false);
 
       if (errorMsg != null) {
+        _isAutoSkipping = false; // Liberar guard: no se encontró stream compatible
         _showError(errorMsg);
         return;
       }
@@ -932,8 +937,13 @@ class _HostRoomPageState extends State<HostRoomPage> {
       // Iniciar reproducción
       try {
         await _audioPlayer?.play();
+        // Guard liberado: la nueva canción está reproduciéndose.
+        // Solo aquí es seguro liberar _isAutoSkipping, porque el player
+        // ya habrá pasado por idle/loading y no emitirá 'completed' espurio.
+        _isAutoSkipping = false;
         debugPrint('YouTubePlayer Nativo: reproducción iniciada ✓');
       } catch (playErr) {
+        _isAutoSkipping = false; // Liberar guard: error en play()
         debugPrint('YouTubePlayer Nativo: error al llamar play(): $playErr');
         if (mounted) _showError('No se pudo iniciar la reproducción: $playErr');
       }
