@@ -1129,18 +1129,29 @@ class _HostRoomPageState extends State<HostRoomPage> {
   Future<void> _skipSong({bool autoPlayNext = false}) async {
     if (_currentPlayingDocId == null) return;
     final docToDelete = _currentPlayingDocId;
-    // Limpiar inmediatamente para que si la suscripción de Firestore llega
-    // antes del siguiente snapshot real, no dispare _onNewSong con el doc viejo
-    _currentPlayingDocId = null;
+    // IMPORTANTE: NO reseteamos _currentPlayingDocId aquí.
+    // Si lo ponemos a null y el borrado de Firestore tarda o falla,
+    // cualquier snapshot intermedio con el doc actual en posición 0
+    // re-dispararía _onNewSong → bucle infinito.
+    // La suscripción _playlistSubscription actualiza _currentPlayingDocId
+    // de forma segura cuando Firestore confirma el cambio.
     _progressNotifier.value = 0.0;
     _currentYtVideoId = null;
 
-    await FirebaseFirestore.instance
-        .collection('rooms')
-        .doc(_pin)
-        .collection('playlist')
-        .doc(docToDelete)
-        .delete();
+    try {
+      await FirebaseFirestore.instance
+          .collection('rooms')
+          .doc(_pin)
+          .collection('playlist')
+          .doc(docToDelete)
+          .delete();
+    } catch (e) {
+      // Error de permisos u otro: no hacer nada.
+      // _currentPlayingDocId no fue modificado, así que la suscripción
+      // no re-disparará _onNewSong con el mismo doc.
+      debugPrint('_skipSong: error al borrar doc de Firestore: $e');
+      return;
+    }
 
     if (!autoPlayNext && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

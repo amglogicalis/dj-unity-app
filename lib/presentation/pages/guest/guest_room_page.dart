@@ -714,29 +714,32 @@ class _GuestRoomPageState extends State<GuestRoomPage> {
               final queueDocs =
                   docs.length > 1 ? docs.sublist(1) : <QueryDocumentSnapshot>[];
 
-              return Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 20.0, vertical: 8.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // ── SONANDO AHORA ───────────────────────────
-                    // Usamos KeyedSubtree para forzar reconstrucción completa
-                    // del widget cuando cambia la canción (título o portada)
-                    KeyedSubtree(
-                      key: ValueKey(currentData?['title'] ?? ''),
-                      child: _buildNowPlayingSection(hasSongs, currentData),
+              return LayoutBuilder(
+                builder: (context, constraints) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20.0, vertical: 8.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // ── SONANDO AHORA ───────────────────────────
+                        KeyedSubtree(
+                          key: ValueKey(currentData?['title'] ?? ''),
+                          child: _buildNowPlayingSection(hasSongs, currentData),
+                        ),
+                        const SizedBox(height: 20),
+
+                        // ── COLA ─────────────────────────────────────
+                        // Expanded aquí (no dentro de _buildQueueSection)
+                        // garantiza constraints acotados en web/iOS/Android
+                        Expanded(
+                          child: _buildQueueSection(
+                              snapshot, queueDocs, hasSongs),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 20),
-
-                    // ── COLA ─────────────────────────────────────
-                    _buildQueueSection(
-                        snapshot, queueDocs, hasSongs),
-
-                    // Espacio mínimo superior a la cola
-                    const SizedBox(height: 4),
-                  ],
-                ),
+                  );
+                },
               );
             },
           ),
@@ -890,8 +893,10 @@ class _GuestRoomPageState extends State<GuestRoomPage> {
     List<QueryDocumentSnapshot> queueDocs,
     bool hasSongs,
   ) {
-    return Expanded(
-      child: Column(
+    // _buildQueueSection ya NO devuelve Expanded —
+    // el Expanded está en el call site para garantizar
+    // constraints acotados en web y evitar layout issues.
+    return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
@@ -1034,7 +1039,6 @@ class _GuestRoomPageState extends State<GuestRoomPage> {
                       ),
           ),
         ],
-      ),
-    );
+      );
   }
 }

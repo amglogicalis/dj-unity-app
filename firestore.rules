@@ -1,0 +1,18 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Salas del DJ ─────────────────────────────────────────────
+    // Cualquiera puede crear/leer salas (no se usa auth en esta versión)
+    match /rooms/{roomId} {
+      allow read, write: if true;
+
+      // ── Lista de reproducción ────────────────────────────────
+      // Invitados pueden añadir; el DJ puede leer, añadir y borrar.
+      // Sin autenticación, abrimos permisos de escritura/borrado.
+      match /playlist/{songId} {
+        allow read, write, delete: if true;
+      }
+    }
+  }
+}
