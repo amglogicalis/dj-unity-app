@@ -721,15 +721,20 @@ class _GuestRoomPageState extends State<GuestRoomPage> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     // ── SONANDO AHORA ───────────────────────────
-                    _buildNowPlayingSection(hasSongs, currentData),
+                    // Usamos KeyedSubtree para forzar reconstrucción completa
+                    // del widget cuando cambia la canción (título o portada)
+                    KeyedSubtree(
+                      key: ValueKey(currentData?['title'] ?? ''),
+                      child: _buildNowPlayingSection(hasSongs, currentData),
+                    ),
                     const SizedBox(height: 20),
 
                     // ── COLA ─────────────────────────────────────
                     _buildQueueSection(
                         snapshot, queueDocs, hasSongs),
 
-                    // Espacio para el FAB
-                    const SizedBox(height: 80),
+                    // Espacio mínimo superior a la cola
+                    const SizedBox(height: 4),
                   ],
                 ),
               );
@@ -811,6 +816,7 @@ class _GuestRoomPageState extends State<GuestRoomPage> {
                 child: thumb.isNotEmpty
                     ? Image.network(
                         thumb,
+                        key: ValueKey(thumb),
                         width: 64,
                         height: 64,
                         fit: BoxFit.cover,
@@ -944,6 +950,7 @@ class _GuestRoomPageState extends State<GuestRoomPage> {
                         ),
                       )
                     : ListView.builder(
+                        padding: const EdgeInsets.only(bottom: 90),
                         itemCount: queueDocs.length,
                         itemBuilder: (context, i) {
                           final song = queueDocs[i].data()

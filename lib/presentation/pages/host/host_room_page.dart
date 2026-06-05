@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
@@ -58,6 +57,7 @@ class _HostRoomPageState extends State<HostRoomPage> {
   YoutubePlayerController? _ytController;
   StreamSubscription? _ytStateSubscription;
   StreamSubscription? _ytValueSubscription;
+  StreamSubscription<QuerySnapshot>? _playlistSubscription;
   String? _currentYtVideoId;
 
   // ── Modo YouTube Nativo (Android) ───────────────────────────
@@ -503,6 +503,7 @@ class _HostRoomPageState extends State<HostRoomPage> {
     _seekFailsafeTimer?.cancel();
     _ytStateSubscription?.cancel();
     _ytValueSubscription?.cancel();
+    _playlistSubscription?.cancel();
     _ytController?.close();
     _playerStateSubscription?.cancel();
     _playerPositionSubscription?.cancel();
@@ -534,6 +535,43 @@ class _HostRoomPageState extends State<HostRoomPage> {
           .collection('playlist')
           .orderBy('createdAt', descending: false)
           .snapshots();
+
+      // ── Suscripción dedicada: detecta cambios de canción fuera del build() ──
+      // Esto evita la race condition con el wave timer (setState cada 50ms)
+      // que antes podía disparar _onNewSong múltiples veces o perdérselo.
+      _playlistSubscription?.cancel();
+      _playlistSubscription = _playlistStream.listen((qs) {
+        if (!mounted) return;
+        final nextDocId = qs.docs.isNotEmpty ? qs.docs.first.id : null;
+        if (nextDocId == _currentPlayingDocId) return; // Sin cambio real
+        _currentPlayingDocId = nextDocId;
+        _progressNotifier.value = 0.0;
+        if (nextDocId != null) {
+          final data = qs.docs.first.data() as Map<String, dynamic>;
+          final t = data['title'] as String? ?? '';
+          final a = data['artist'] as String? ?? '';
+          final th = data['thumbnailUrl'] as String? ?? '';
+          if (t.isNotEmpty) _onNewSong(t, a, thumbnailUrl: th);
+        } else {
+          // Cola vacía: pausar reproducción
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            if (_mode == RoomMode.youtubeIntegrated) {
+              if (kIsWeb) {
+                _ytController?.pauseVideo();
+              } else {
+                _audioPlayer?.stop();
+              }
+              setState(() { _currentYtVideoId = null; _isPlaying = false; });
+            } else if (_mode == RoomMode.spotifyPremium) {
+              _spotifyPremium.pause();
+              setState(() => _isPlaying = false);
+            } else {
+              setState(() => _isPlaying = false);
+            }
+          });
+        }
+      });
 
       setState(() => _pin = pinStr);
       _createRoomInFirestore(pinStr);
@@ -756,61 +794,6 @@ class _HostRoomPageState extends State<HostRoomPage> {
     } else {
       // ── Android APK: reproducción nativa con fallback multi-calidad ──
       await _audioPlayer?.stop();
-
-      // 1. DIAGNÓSTICO EN EL MÓVIL (Para inspección en consola)
-      try {
-        debugPrint('--- INICIANDO DIAGNÓSTICO DE RED EN EL MÓVIL ---');
-        final testYt = yte.YoutubeExplode();
-        final testClients = {
-          'androidVr': yte.YoutubeApiClient.androidVr,
-          'android': yte.YoutubeApiClient.android,
-          'androidSdkless': yte.YoutubeApiClient.androidSdkless,
-          'ios': yte.YoutubeApiClient.ios,
-          'mweb': yte.YoutubeApiClient.mweb,
-        };
-        final testUas = {
-          'none': null,
-          'youtube_android': 'com.google.android.youtube/19.12.35 (Linux; U; Android 11; Build/RP1A.200720.011) Version/19.12.35',
-          'youtube_ios': 'com.google.ios.youtube/19.17.2 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X; en_US)',
-          'chrome_mobile': 'Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.50 Mobile Safari/537.36',
-        };
-        for (final cEntry in testClients.entries) {
-          try {
-            final m = await testYt.videos.streamsClient.getManifest(
-              videoId,
-              ytClients: [cEntry.value],
-            ).timeout(const Duration(seconds: 5));
-            final streams = m.audioOnly.toList();
-            if (streams.isEmpty) {
-              debugPrint('  [Diag] Cliente ${cEntry.key}: Sin streams de audio.');
-              continue;
-            }
-            final url = streams.first.url.toString();
-            debugPrint('  [Diag] Cliente ${cEntry.key}: manifest OK. Probando URL...');
-            for (final uaEntry in testUas.entries) {
-              try {
-                final client = HttpClient();
-                final request = await client.getUrl(Uri.parse(url)).timeout(const Duration(seconds: 4));
-                request.headers.add('Range', 'bytes=0-10');
-                if (uaEntry.value != null) {
-                  request.headers.add('User-Agent', uaEntry.value!);
-                }
-                final response = await request.close().timeout(const Duration(seconds: 4));
-                debugPrint('    - UA [${uaEntry.key}] -> HTTP ${response.statusCode}');
-                await response.drain();
-              } catch (reqErr) {
-                debugPrint('    - UA [${uaEntry.key}] -> Error: $reqErr');
-              }
-            }
-          } catch (cErr) {
-            debugPrint('  [Diag] Cliente ${cEntry.key}: Falló manifest ($cErr)');
-          }
-        }
-        testYt.close();
-        debugPrint('--- FIN DEL DIAGNÓSTICO DE RED ---');
-      } catch (diagErr) {
-        debugPrint('Error en el código de diagnóstico: $diagErr');
-      }
 
       String? workingUrl;
       String? errorMsg;
@@ -1146,6 +1129,9 @@ class _HostRoomPageState extends State<HostRoomPage> {
   Future<void> _skipSong({bool autoPlayNext = false}) async {
     if (_currentPlayingDocId == null) return;
     final docToDelete = _currentPlayingDocId;
+    // Limpiar inmediatamente para que si la suscripción de Firestore llega
+    // antes del siguiente snapshot real, no dispare _onNewSong con el doc viejo
+    _currentPlayingDocId = null;
     _progressNotifier.value = 0.0;
     _currentYtVideoId = null;
 
@@ -1312,49 +1298,6 @@ class _HostRoomPageState extends State<HostRoomPage> {
                     final currentData = hasSongs
                         ? (docs.first.data() as Map<String, dynamic>)
                         : null;
-                    final nextDocId = hasSongs ? docs.first.id : null;
-
-                    // Detectar cambio de canción
-                    if (nextDocId != _currentPlayingDocId) {
-                      _currentPlayingDocId = nextDocId;
-                      _progressNotifier.value = 0.0;
-
-                      if (hasSongs && currentData != null) {
-                        final title =
-                            currentData['title'] as String? ?? '';
-                        final artist =
-                            currentData['artist'] as String? ?? '';
-                        final thumbnail =
-                            currentData['thumbnailUrl'] as String? ?? '';
-                        if (title.isNotEmpty) {
-                          Future.microtask(
-                              () => _onNewSong(title, artist, thumbnailUrl: thumbnail));
-                        }
-                      } else {
-                        // Cola vacía: diferir el setState para no crashear
-                        // si el stream de Firestore llega durante el build
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (!mounted) return;
-                          if (_mode == RoomMode.youtubeIntegrated) {
-                            if (kIsWeb) {
-                              _ytController?.pauseVideo();
-                            } else {
-                              _audioPlayer?.pause();
-                            }
-                            setState(() {
-                              _currentYtVideoId = null;
-                              _isPlaying = false;
-                            });
-                          } else if (_mode == RoomMode.spotifyPremium) {
-                            _spotifyPremium.pause();
-                            setState(() => _isPlaying = false);
-                          } else {
-                            setState(() => _isPlaying = false);
-                          }
-                        });
-                      }
-                    }
-
                     final title = currentData?['title'] as String? ??
                         'Esperando canciones del público...';
                     final artist = currentData?['artist'] as String? ??
@@ -1565,6 +1508,7 @@ class _HostRoomPageState extends State<HostRoomPage> {
                               child: thumbnail.isNotEmpty
                                   ? Image.network(
                                       thumbnail,
+                                      key: ValueKey(thumbnail),
                                       fit: BoxFit.cover,
                                       errorBuilder: (_, __, ___) => const Center(
                                         child: Icon(Icons.music_note_rounded,
@@ -1581,6 +1525,7 @@ class _HostRoomPageState extends State<HostRoomPage> {
                     : (thumbnail.isNotEmpty
                         ? Image.network(
                             thumbnail,
+                            key: ValueKey(thumbnail),
                             fit: BoxFit.cover,
                             errorBuilder: (_, __, ___) => const Center(
                               child: Icon(Icons.music_note_rounded,
@@ -1597,6 +1542,7 @@ class _HostRoomPageState extends State<HostRoomPage> {
             if (_mode != RoomMode.youtubeIntegrated && thumbnail.isNotEmpty)
               Positioned.fill(
                 child: Image.network(thumbnail,
+                    key: ValueKey(thumbnail),
                     fit: BoxFit.cover,
                     errorBuilder: (_, __, ___) => const SizedBox.shrink()),
               ),
