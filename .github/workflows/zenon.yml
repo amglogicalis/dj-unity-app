@@ -1,0 +1,45 @@
+name: Zenon AI Assistant
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Modo de ejecución'
+        required: true
+        default: 'objective'
+        type: choice
+        options:
+          - assist
+          - correct
+          - objective
+      objective-file:
+        description: 'Nombre del archivo con el objetivo (solo para modo objective)'
+        required: false
+        default: 'zenon_objective.md'
+
+jobs:
+  zenon:
+    runs-on: ubuntu-latest
+    
+    # REQUISITO CRÍTICO: Permisos de escritura para poder modificar archivos y hacer commit/push del código generado en el nuevo repo
+    permissions:
+      contents: write
+      pull-requests: write
+      
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Zenon AI Assistant
+        uses: amglogicalis/my-github-actions@main  # O tu ruta local si usaste la opción 3
+        with:
+          zenon-api-key: ${{ secrets.ZENON_API_KEY }}
+          groq-api-key: ${{ secrets.GROQ_API_KEY }}
+          cohere-api-key: ${{ secrets.COHERE_API_KEY }}
+          openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
+          samba-api-key: ${{ secrets.SAMBA_API_KEY }}
+          cerebras-api-key: ${{ secrets.CEREBRAS_API_KEY }}
+          gh-models-token: ${{ secrets.TOKEN_GH }}
+          objective-file: ${{ github.event.inputs.objective-file || 'zenon_objective.md' }}
